@@ -75,12 +75,19 @@ privacy:
   redact_pii: true
 ```
 
-## Still to verify against Hermes docs
+## Hermes integration (confirmed against Hermes v0.22.2)
 
-1. Exact `gateway.profile_routes` syntax and the restricted fallback profile.
-2. MCP config keys: `headers` and `identity_header` (name of the header carrying the profile).
-3. API-server run request body and response field (isolated in `app/hermes.py`).
-4. Real Hevy description format (adjust `SET_RE` in `app/hevy.py` with a real sample).
+1. `gateway.profile_routes` is a **list** of `{name, platform, chat_id, profile}` entries. There
+   is no fallback-profile key: an unrouted message is served by the default profile, and an
+   unauthorized DM gets `unauthorized_dm_behavior` (`decline` + `unauthorized_dm_decline_message`).
+2. MCP config: `mcp_servers.<name>.url` + `.headers` + `identity_header`, where
+   `identity_header` is a **mapping** `{name: x-hermes-profile, value_from: profile}`
+   (`value_from: profile` sends the active profile name; a bare string sends nothing).
+3. The API server's run API is asynchronous: `POST /p/<profile>/v1/runs` with `{"input": "..."}`
+   returns 202 `{"run_id": ...}`; the reply text is `output` on
+   `GET /p/<profile>/v1/runs/<run_id>` once `status` is `completed`. `app/hermes.py` does this.
+4. `hermes profile create` / `list` / `delete` exist; profiles live in `HERMES_HOME\profiles\<name>`.
+5. Still to verify: real Hevy description format (adjust `SET_RE` in `app/hevy.py`).
 
 ## Strava notes
 

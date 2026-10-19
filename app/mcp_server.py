@@ -1,5 +1,9 @@
 """MCP tools for Hermes. Runner tools act only on the runner resolved from headers.
 
+No tool takes a runner id: the runner comes from the calling profile's identity
+(``identity_header: {name: x-hermes-profile, value_from: profile}``) plus its own bearer
+token, both checked against ``runners`` in ``app.identity``.
+
 Run:  python -m app.mcp_server   (streamable HTTP on :8100/mcp)
 """
 import hmac

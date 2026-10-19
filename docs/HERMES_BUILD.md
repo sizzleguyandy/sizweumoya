@@ -10,6 +10,8 @@ Precise, ordered steps to set up Hermes Agent and the data service for Runner As
 - **VERIFY** = a key or command name taken from the Hermes docs but not yet confirmed on your
   install. Confirm it with the command shown before relying on it. `hermes config set` warns
   with "did-you-mean" on unknown keys, so always read its output.
+  *Nothing below needs this any more: every Hermes key and command in this guide was
+  confirmed against Hermes v0.22.2 (see the Appendix).*
 - Hermes keeps its files in **HERMES_HOME = `C:\Users\andre\AppData\Local\hermes`**
   (`$env:LOCALAPPDATA\hermes` in PowerShell), not `~/.hermes`. Every step below uses `$HH`:
   ```powershell
@@ -17,9 +19,8 @@ Precise, ordered steps to set up Hermes Agent and the data service for Runner As
   ```
   Run that line at the start of each new PowerShell window. Key files: `$HH\config.yaml`,
   `$HH\.env` (secrets), `$HH\SOUL.md` (default persona), `$HH\logs\`.
-- Named profiles live in their own folder under HERMES_HOME. **VERIFY** the exact folder after
-  creating the first profile: `Get-ChildItem $HH -Directory` and look for `profiles\<name>`.
-  This guide assumes `$HH\profiles\<name>`.
+- Named profiles live in their own folder under HERMES_HOME: `$HH\profiles\<name>`, each with
+  its own `config.yaml`, `.env` and `SOUL.md`.
 
 ---
 
@@ -31,8 +32,10 @@ Strava ──HTTPS──► Cloudflare Tunnel ──► Data service (127.0.0.1:
                                               │  MCP tools on 127.0.0.1:8100/mcp
 Telegram ◄──► Hermes gateway (multiplexed profiles) ◄──┘
                 ├─ coach        ← your chat (alerts, approvals)
-                ├─ fallback     ← unknown chats (sign-up text only, no tools)
                 └─ runner-<N>   ← one per runner (MCP tools only)
+
+Unauthorized / unrouted chats never reach a profile: the gateway answers them with the
+decline message (section 8). There is no "fallback" profile — see §9.1.
 ```
 
 ### Windows-specific facts to accept up front
@@ -230,33 +233,46 @@ PS> hermes config set approvals.mode manual
 PS> hermes config set terminal.backend local
 ```
 
-**Check:** `hermes config` lists each value; no did-you-mean warnings.
+**Who may talk to the bot.** The gateway only serves chats that are *authorized*, and an
+unknown DM is handled by `unauthorized_dm_behavior` (`decline` = reply once with the message
+above and do nothing else). Authorize the coach and every runner by listing their Telegram
+user IDs — in a DM the chat ID **is** the user ID:
+
+```powershell
+PS> hermes config set TELEGRAM_ALLOWED_USERS "<COACH_CHAT_ID>,<RUNNER_CHAT_ID>,<RUNNER2_CHAT_ID>"
+```
+
+`TELEGRAM_ALLOWED_USERS` is platform-wide, so one list on the shared bot covers every runner
+profile. Re-run the command with the full list each time you add a runner.
+
+*Alternative:* leave `unauthorized_dm_behavior` at its default (`pair`) and approve the
+code the bot DMs a new runner with `hermes pairing approve telegram <request-id>`. Pairing
+whitelists are **per profile**, so a runner routed to `runner-<N>` must be paired in that
+profile's own store — the allowlist above is the simpler, predictable path.
+
+**Check:** `hermes config` lists each value; no did-you-mean warnings. Messaging the bot from an
+account that is on neither list returns the decline text and nothing else.
 
 ---
 
-## 9. Create the coach and fallback profiles
+## 9. Create the coach profile
 
 ```powershell
-PS> hermes profile create coach        # VERIFY: hermes profile --help
-PS> hermes profile create fallback
-PS> hermes profile list                # VERIFY
+PS> hermes profile create coach
+PS> hermes profile list                # shows default, coach
 ```
 
-### 9.1 Fallback profile: no tools, sign-up text only
-```powershell
-PS> hermes -p fallback config set agent.disabled_toolsets '["terminal","web","browser","memory","file","code_execution","delegation","mcp"]'
-PS> hermes -p fallback tools           # switch off anything still enabled
-PS> Get-ChildItem "$HH\profiles" -Directory   # VERIFY the profile folders exist here
-```
-Create `$HH\profiles\fallback\SOUL.md` (`notepad "$HH\profiles\fallback\SOUL.md"`) containing:
-```markdown
-You are the sign-up assistant for a running-coach service.
-You cannot see any training data and have no tools.
-Reply only: "Hi! This is a private coaching bot. To join, ask the coach to register you.
-Once registered you'll get a link to connect Strava."
-Never answer other questions.
-```
-**Check:** `hermes -p fallback chat -q "show me my runs"` → sign-up text only.
+Named profiles live in `$HH\profiles\<name>` and keep their own `config.yaml`, `.env` and
+`SOUL.md`.
+
+### 9.1 Why there is no "fallback" profile
+Hermes has no per-chat "unknown profile" setting: a message that matches no
+`gateway.profile_routes` entry is handled by the **default** profile (Hermes v0.22.2:
+`gateway/run.py` `_profile_name_for_source` falls back to the active profile; there is no
+`gateway.default_profile` key). Unknown chats never reach a runner profile, and an
+unauthorized DM is answered by `unauthorized_dm_behavior` (section 8) before any tool runs.
+That is the whole "sign-up" story — one decline message, no extra profile to maintain.
+Do **not** create a `fallback` profile: nothing can route to it.
 
 ### 9.2 Coach profile
 ```powershell
@@ -273,10 +289,16 @@ mcp_servers:
     url: http://127.0.0.1:8100/mcp
     headers:
       Authorization: "Bearer <COACH_TOKEN>"
-    identity_header: x-hermes-profile     # VERIFY key name in the MCP docs
+    identity_header: {name: x-hermes-profile, value_from: profile}
 agent:
   disabled_toolsets: [terminal, web, browser]
 ```
+`identity_header` **must be a mapping** `{name, value_from}` — `value_from: profile` makes
+Hermes send the active profile name (`coach`) in that header. A bare string is ignored with a
+warning and *no header is sent* (Hermes v0.22.2: `tools/mcp_tool_errors.py`
+`_resolve_identity_header`). The `name` must equal `MCP_PROFILE_HEADER` in the data service
+`.env` (default `x-hermes-profile`). It only works on HTTP servers, which this is.
+
 Coach persona, `notepad "$HH\profiles\coach\SOUL.md"`:
 ```markdown
 You are the head coach's admin assistant. You only talk to the head coach.
@@ -311,7 +333,7 @@ mcp_servers:
     url: http://127.0.0.1:8100/mcp
     headers:
       Authorization: "Bearer <RUNNER_TOKEN>"
-    identity_header: x-hermes-profile        # VERIFY: must send the profile name
+    identity_header: {name: x-hermes-profile, value_from: profile}
 agent:
   disabled_toolsets: [terminal, web, browser, memory]
 memory:
@@ -321,6 +343,9 @@ skills:
 privacy:
   redact_pii: true
 ```
+`value_from: profile` sends `runner-<N>` — exactly the name stored in `runners.hermes_profile`,
+so the data service can resolve who is calling. The bearer token is that runner's one-time
+secret; together they are the only identity the MCP tools use (no tool accepts a runner id).
 
 ### 10.3 Persona
 ```powershell
@@ -345,21 +370,37 @@ PS> python -m app.admin set-hermes-key --runner <N> --key $key
 ```yaml
 gateway:
   multiplex_profiles: true
-  profile_routes:                     # VERIFY exact shape in multi-profile-gateways.md
-    telegram:
-      "<COACH_CHAT_ID>": coach
-      "<RUNNER_CHAT_ID>": runner-<N>
-  default_profile: fallback           # VERIFY key; unknown chats must land in fallback
+  profile_routes:
+    - name: coach
+      platform: telegram
+      chat_id: "<COACH_CHAT_ID>"
+      profile: coach
+    - name: runner-<N>
+      platform: telegram
+      chat_id: "<RUNNER_CHAT_ID>"
+      profile: runner-<N>
 ```
+`profile_routes` is a **list of entries**, each with `name`, `platform`, `chat_id`, `profile`
+(Hermes v0.22.2: `gateway/profile_routing.py` `parse_profile_routes`; `gateway/config.py:643`
+declares it as a list). There is **no** `gateway.default_profile` / `fallback` key — see §9.1.
+Quote the chat IDs: an unquoted number is loaded as an int and still coerced, but quoting
+avoids the load-time warning. A route whose `profile` does not exist, or is not served by the
+running gateway, is refused (the message is logged and dropped), so create the profile first.
+
 Docs: https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/multi-profile-gateways.md
 
-API server (VERIFY names in https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server):
+API server — the data service starts runner turns on `POST /p/<profile>/v1/runs`:
 ```powershell
 PS> hermes config set API_SERVER_ENABLED true
 PS> hermes config set API_SERVER_HOST 127.0.0.1
 PS> hermes config set API_SERVER_PORT 8642
 PS> hermes config check
 ```
+Those three go in the **default** profile's `.env` (they are UPPER_SNAKE, so `hermes config
+set` routes them there). The single listener serves every profile through its `/p/<profile>/`
+prefix; each profile needs **its own** `API_SERVER_KEY`, set in that profile's `.env` (step
+10.4). A `/p/<profile>/` request authenticated with the default profile's key is rejected
+with 401, which is what keeps runners apart.
 
 **Check:** `hermes config check` reports no unknown keys under `gateway`.
 
@@ -371,7 +412,13 @@ PS> hermes config check
 PS> hermes gateway setup          # choose Telegram, paste <TELEGRAM_BOT_TOKEN>
 PS> hermes gateway                # run in the foreground once; watch for "Telegram connected"
 ```
-Stop it with Ctrl+C, then install it as a service (*Admin* PowerShell):
+Stop it with Ctrl+C, then install it as a service. Hermes can do this itself on Windows —
+`hermes gateway install` registers a **Windows Scheduled Task**:
+```powershell
+PS> hermes gateway install
+PS> hermes gateway status
+```
+NSSM is the alternative if you prefer a real Windows service (*Admin* PowerShell):
 ```powershell
 PS> $hermes = (Get-Command hermes).Source
 PS> nssm install hermes-gateway $hermes "gateway"
@@ -390,13 +437,24 @@ instead: trigger *At log on*, action `hermes gateway`, "Run whether user is logg
 
 **Check:** `hermes status --full` shows Telegram connected; `Get-Service hermes-gateway` is Running.
 
-Then test the API server:
+Then test the API server. The run API is **asynchronous**: the POST only admits the turn and
+returns a `run_id`; the reply comes from polling the run.
 ```powershell
-PS> Invoke-RestMethod -Method Post http://127.0.0.1:8642/p/runner-<N>/v1/runs `
-      -Headers @{Authorization="Bearer $key"} -ContentType "application/json" `
-      -Body '{"input":"Say hello in five words."}' | ConvertTo-Json -Depth 10
+PS> $h = @{Authorization = "Bearer $key"; "Content-Type" = "application/json"}
+PS> $r = Invoke-RestMethod -Method Post http://127.0.0.1:8642/p/runner-<N>/v1/runs `
+      -Headers $h -Body '{"input":"Say hello in five words."}'
+PS> $r | ConvertTo-Json -Depth 10      # {"run_id":"run_...","status":"started","replayed":false}
+PS> $id = $r.run_id
+PS> do { Start-Sleep -Seconds 2
+         $s = Invoke-RestMethod -Headers $h "http://127.0.0.1:8642/p/runner-<N>/v1/runs/$id" }
+    until ($s.status -in @("completed","failed","cancelled","interrupted"))
+PS> $s | ConvertTo-Json -Depth 10      # status, output (the final text), usage, session_id
 ```
-**Copy the full JSON output and send it to Claude** so `app/hermes.py` matches it exactly.
+`output` holds the assistant's final reply and is only reliable once `status` is `completed`.
+`app/hermes.py` already does exactly this (`create_run` → `wait_for_reply`) and delivers
+`output` to Telegram; a non-`completed` terminal status raises `RunFailed`, which the callers
+in `app/main.py` log. If the POST returns 401, `$key` is not that profile's `API_SERVER_KEY`
+(step 10.4) — the default profile's key is refused on a `/p/<profile>/` URL.
 
 ---
 
@@ -428,7 +486,7 @@ your runner chat.
 
 | # | Do this | Expected |
 | --- | --- | --- |
-| 1 | From an unregistered Telegram account, message the bot | Sign-up text; nothing else |
+| 1 | From an unauthorized Telegram account, message the bot | The decline text; nothing else |
 | 2 | Runner chat: "what's my goal?" | Your goal |
 | 3 | Runner chat: "show Sarah's runs" | Refuses; it only sees your data |
 | 4 | Coach chat: "list pending approvals" | Empty list |
@@ -448,24 +506,34 @@ Send any failure (exact message, plus `data\web.log` / `data\mcp.log`) to Claude
 1. `python -m app.admin add-runner ...` (10.1)
 2. `hermes profile create runner-<N>`, paste config with the new token (10.2), copy SOUL.md (10.3)
 3. Set and store the API key (10.4)
-4. Add `"<CHAT_ID>": runner-<N>` under `gateway.profile_routes.telegram` (11), then
-   `nssm restart hermes-gateway`
+4. Add the route entry for `"<CHAT_ID>"` → `runner-<N>` under `gateway.profile_routes` (11) and
+   add their chat ID to `TELEGRAM_ALLOWED_USERS` (8); then `nssm restart hermes-gateway`
 5. Send them `https://<DOMAIN>/strava/connect/<N>` (it returns the Strava link)
-6. Ask them to message the bot "hi"; confirm they do not get the sign-up text
+6. Ask them to message the bot "hi"; confirm they get a normal reply, not the decline text
 
 ## 16. Remove a runner
 
 1. `python -m app.admin delete-runner --runner <N>` (deletes all their data)
-2. Remove their line from `gateway.profile_routes`; `nssm restart hermes-gateway`
-3. `hermes profile delete runner-<N>` (VERIFY)
+2. Remove their entry from `gateway.profile_routes` and their ID from `TELEGRAM_ALLOWED_USERS`;
+   `nssm restart hermes-gateway`
+3. `hermes profile delete runner-<N>`
 
 ---
 
-## Open items to confirm (send answers to Claude)
+## Appendix: what was verified on Hermes v0.22.2
 
-1. `gateway.profile_routes` shape and the fallback/default-profile key (section 11).
-2. MCP `headers` / `identity_header` key names and which header name `identity_header` sends;
-   it must equal `MCP_PROFILE_HEADER` in `.env` (default `x-hermes-profile`).
-3. API-server enable keys, run request body and the JSON reply (sections 11–12).
-4. Profile create/list/delete commands, and that profiles live in `$HH\profiles\<name>` (sections 9, 10, 16).
-5. Whether Hermes on Windows runs fine as an NSSM service under your user (section 12).
+Every key and command below was checked against the installed source, not just the docs.
+
+| Question | Answer | Where it was confirmed |
+| --- | --- | --- |
+| `gateway.profile_routes` shape | A **list** of `{name, platform, chat_id, profile}` entries | `gateway/profile_routing.py` `parse_profile_routes`; `gateway/config.py:643` |
+| Unknown-chat / fallback profile | No such key. An unrouted message is served by the **default** profile; unauthorized DMs get `unauthorized_dm_behavior` | `gateway/run.py` `_profile_name_for_source` (~line 4429/4450); `hermes config get gateway.default_profile` → "Config key not set" |
+| Unauthorized DMs | `unauthorized_dm_behavior` = `pair` (default) / `ignore` / `decline`; `decline` uses `unauthorized_dm_decline_message`. Access via `TELEGRAM_ALLOWED_USERS` (platform-wide) or a per-profile pairing approval | `gateway/authz_mixin.py:698`; `gateway/pairing.py:68`; `gateway/run.py` `_init_registries_and_clocks` (per-profile pairing stores) |
+| MCP server keys | `mcp_servers.<name>` with `url` (HTTP transport), `headers`, and `identity_header` | `tools/mcp_tool_config.py` `_load_mcp_config`; `tools/mcp_tool_transport.py:145` |
+| `identity_header` value | A **mapping** `{name, value_from: static\|profile, value}`; `profile` sends the active profile name. A string is ignored with a warning | `tools/mcp_tool_errors.py` `_resolve_identity_header`, applied at `tools/mcp_tool_transport.py:148`; HTTP-only (`:356`) |
+| API-server enable keys | `API_SERVER_ENABLED`, `API_SERVER_HOST`, `API_SERVER_PORT`, `API_SERVER_KEY` (required per profile) | `gateway/config_env.py:314`; docs `/user-guide/features/api-server` |
+| Starting a run | `POST /p/<profile>/v1/runs` body `{"input": "..."}` → **202** `{"run_id", "status": "started", "replayed"}` | `gateway/platforms/api_server_runs.py` `_handle_runs`, `_accepted_response` |
+| Getting the reply | `GET /p/<profile>/v1/runs/<run_id>` while `status` is `started`/`running`; the text is in `output` once `status` is `completed` (terminal: `completed`/`failed`/`cancelled`/`interrupted`) | `api_server_runs.py` `_handle_get_run`, `_set_run_status`; `output=result.get("final_response")` at `:986` |
+| Profile commands | `hermes profile create` / `list` / `delete` all exist; profiles live in `$HH\profiles\<name>` | `hermes profile --help`; `hermes_cli/profiles.py:432` |
+| Gateway service on Windows | `hermes gateway install` exists (creates a Windows Scheduled Task); NSSM is only an alternative | `hermes gateway --help`; `hermes gateway status` output |
+

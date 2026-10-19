@@ -55,15 +55,20 @@ def main() -> None:
         rid, profile, token = add_runner(conn, args.name, args.chat_id, args.max_hr, args.goal)
         print(f"runner_id: {rid}\nprofile:   {profile}\n")
         print("1) Create the Hermes profile:  hermes profile create", profile)
-        print("2) Add to the gateway config, under gateway.profile_routes:")
-        print(f"     telegram:{args.chat_id} -> {profile}   (check exact syntax in the multi-profile docs)")
+        print("2) In the DEFAULT profile's config.yaml, add the route under gateway.profile_routes:")
+        print(f"""     gateway:
+       multiplex_profiles: true
+       profile_routes:
+         - {{name: {profile}, platform: telegram, chat_id: "{args.chat_id}", profile: {profile}}}""")
+        print(f"   Make sure {args.chat_id} is authorized (TELEGRAM_ALLOWED_USERS in the default")
+        print("   profile's .env) or the DM is declined before routing. Restart the gateway.")
         print(f"3) In {profile}'s config.yaml, add the MCP server:")
         print(f"""     mcp_servers:
        coach_data:
          url: http://127.0.0.1:8100/mcp
          headers:
            Authorization: "Bearer {token}"
-         identity_header: {settings.mcp_profile_header}   # sends the profile name (check key name)""")
+         identity_header: {{name: {settings.mcp_profile_header}, value_from: profile}}""")
         print("4) Set that profile's API_SERVER_KEY, then: python -m app.admin set-hermes-key "
               f"--runner {rid} --key <key>")
         print(f"5) Send the runner their Strava link: {settings.public_base_url}/strava/connect/{rid}")
