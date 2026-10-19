@@ -10,7 +10,16 @@ Precise, ordered steps to set up Hermes Agent and the data service for Runner As
 - **VERIFY** = a key or command name taken from the Hermes docs but not yet confirmed on your
   install. Confirm it with the command shown before relying on it. `hermes config set` warns
   with "did-you-mean" on unknown keys, so always read its output.
-- Hermes keeps its files in `%USERPROFILE%\.hermes` (`$HOME\.hermes` in PowerShell).
+- Hermes keeps its files in **HERMES_HOME = `C:\Users\andre\AppData\Local\hermes`**
+  (`$env:LOCALAPPDATA\hermes` in PowerShell), not `~/.hermes`. Every step below uses `$HH`:
+  ```powershell
+  PS> $HH = "$env:LOCALAPPDATA\hermes"
+  ```
+  Run that line at the start of each new PowerShell window. Key files: `$HH\config.yaml`,
+  `$HH\.env` (secrets), `$HH\SOUL.md` (default persona), `$HH\logs\`.
+- Named profiles live in their own folder under HERMES_HOME. **VERIFY** the exact folder after
+  creating the first profile: `Get-ChildItem $HH -Directory` and look for `profiles\<name>`.
+  This guide assumes `$HH\profiles\<name>`.
 
 ---
 
@@ -237,9 +246,9 @@ PS> hermes profile list                # VERIFY
 ```powershell
 PS> hermes -p fallback config set agent.disabled_toolsets '["terminal","web","browser","memory","file","code_execution","delegation","mcp"]'
 PS> hermes -p fallback tools           # switch off anything still enabled
-PS> hermes -p fallback config edit     # note HERMES_HOME folder shown/used
+PS> Get-ChildItem "$HH\profiles" -Directory   # VERIFY the profile folders exist here
 ```
-In that profile's folder (VERIFY: usually `$HOME\.hermes\profiles\fallback`) create `SOUL.md`:
+Create `$HH\profiles\fallback\SOUL.md` (`notepad "$HH\profiles\fallback\SOUL.md"`) containing:
 ```markdown
 You are the sign-up assistant for a running-coach service.
 You cannot see any training data and have no tools.
@@ -268,7 +277,7 @@ mcp_servers:
 agent:
   disabled_toolsets: [terminal, web, browser]
 ```
-Coach `SOUL.md` (in `$HOME\.hermes\profiles\coach`, VERIFY path):
+Coach persona, `notepad "$HH\profiles\coach\SOUL.md"`:
 ```markdown
 You are the head coach's admin assistant. You only talk to the head coach.
 Use coach_pending_approvals, coach_decide and coach_open_alerts.
@@ -315,7 +324,7 @@ privacy:
 
 ### 10.3 Persona
 ```powershell
-PS> Copy-Item "$HOME\sizweumoya\hermes\SOUL.md" "$HOME\.hermes\profiles\runner-<N>\SOUL.md"   # VERIFY folder
+PS> Copy-Item "$HOME\sizweumoya\hermes\SOUL.md" "$HH\profiles\runner-<N>\SOUL.md"
 ```
 
 ### 10.4 API key for the data service
@@ -370,7 +379,12 @@ PS> nssm set hermes-gateway AppDirectory $HOME
 PS> nssm set hermes-gateway ObjectName ".\<WINDOWS_USERNAME>" "<WINDOWS_PASSWORD>"
 PS> nssm start hermes-gateway
 ```
-`ObjectName` makes the service run as **you**, so it uses your `$HOME\.hermes` config.
+`ObjectName` makes the service run as **you**. Also pin HERMES_HOME so the service can never
+fall back to a different folder:
+```powershell
+PS> nssm set hermes-gateway AppEnvironmentExtra "HERMES_HOME=$env:LOCALAPPDATA\hermes"
+PS> nssm restart hermes-gateway
+```
 (If your Windows sign-in is a Microsoft account with no password/PIN-only, use Task Scheduler
 instead: trigger *At log on*, action `hermes gateway`, "Run whether user is logged on or not".)
 
@@ -453,5 +467,5 @@ Send any failure (exact message, plus `data\web.log` / `data\mcp.log`) to Claude
 2. MCP `headers` / `identity_header` key names and which header name `identity_header` sends;
    it must equal `MCP_PROFILE_HEADER` in `.env` (default `x-hermes-profile`).
 3. API-server enable keys, run request body and the JSON reply (sections 11–12).
-4. Profile create/list/delete commands and each profile's folder path (sections 9, 10, 16).
+4. Profile create/list/delete commands, and that profiles live in `$HH\profiles\<name>` (sections 9, 10, 16).
 5. Whether Hermes on Windows runs fine as an NSSM service under your user (section 12).
