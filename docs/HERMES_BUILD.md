@@ -123,6 +123,15 @@ PS> python -m app.admin init
 
 **Check:** `data\runners.db` now exists.
 
+> **Write `.env` with LF line endings, not CRLF.** PowerShell's `Set-Content` and Python's
+> text-mode `write_text` both emit CRLF on Windows, and every value then carries a stray
+> carriage return. The settings all still *look* set, but `RAC_DB_PATH` points at a path that
+> does not exist, so no service reads its own configuration.
+>
+> To check: `Select-String -Path .env -Pattern ([char]13)` — no matches is what you want. To
+> fix it: read the file as bytes in Python, replace the two-byte CRLF sequence with a single
+> LF byte, write the bytes back, and do not let a text-mode writer touch the file again.
+
 ---
 
 ## 4. Run the data service as two Windows services
@@ -279,6 +288,18 @@ PS> hermes profile list                # shows default, coach
 Named profiles live in `$HH\profiles\<name>` and keep their own `config.yaml`, `.env` and
 `SOUL.md`.
 
+**First: give the new profile its own model key.** Profiles never share credentials, so a
+freshly created profile fails its first turn with `No API key found for provider '<provider>'`.
+Copy the provider key from the default profile's `.env` into this one — same key name, same
+value, and nothing printed:
+
+```powershell
+PS> $k = (Select-String -Path "$HH\.env" -Pattern '^OPENROUTER_API_KEY=(.+)$').Matches[0].Groups[1].Value
+PS> Add-Content "$HH\profiles\coach\.env" "OPENROUTER_API_KEY=$k"
+```
+(Use the name your own default profile uses — `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, … Each
+profile may hold a different provider key; that is the point.)
+
 ### 9.1 Why there is no "fallback" profile
 Hermes has no per-chat "unknown profile" setting: a message that matches no
 `gateway.profile_routes` entry is handled by the **default** profile (Hermes v0.22.2:
@@ -369,7 +390,10 @@ your main account is the coach).
 ```powershell
 PS> python -m app.admin add-runner --name "<NAME>" --chat-id <RUNNER_CHAT_ID> --max-hr <MAX_HR> --goal "<GOAL>"
 ```
-Note `runner_id` `<N>`, profile `runner-<N>` and the one-time `<RUNNER_TOKEN>`.
+Note `runner_id` `<N>`, profile `runner-<N>` and the one-time `<RUNNER_TOKEN>`. The token is
+printed inside a `Bearer "…"` header, so if you copy it with a script, strip the surrounding
+quotes — a token with a trailing quote fails identity resolution with a permission error, not a
+clear "bad token" message.
 
 ### 10.2 Create and configure the profile
 ```powershell
@@ -485,6 +509,14 @@ prefix; each profile needs **its own** `API_SERVER_KEY`, set in that profile's `
 10.4). A `/p/<profile>/` request authenticated with the default profile's key is rejected
 with 401, which is what keeps runners apart.
 
+**What actually enables the server: the key.** In Hermes v0.22.2 the listener comes up when a
+usable `API_SERVER_KEY` (16+ characters) is present in the environment — `gateway/config_env.py`
+`_api_server()` returns early without one, and that is the only gate. `API_SERVER_ENABLED` is
+documented in the API-server page and the environment reference, but **no code path reads it**,
+so `false` neither starts nor stops anything: to turn the listener off, remove `API_SERVER_KEY`.
+Set both anyway — the key is required regardless, and stating the intent in `.env` costs
+nothing. Give the default profile a key of its own too, or only the `/p/<profile>/` routes work.
+
 **Check:** `hermes config check` reports no unknown keys under `gateway`.
 
 ---
@@ -591,14 +623,15 @@ Send any failure (exact message, plus `data\web.log` / `data\mcp.log`) to Claude
 
 1. `python -m app.admin add-runner ...` (10.1)
 2. `hermes profile create runner-<N>`, paste the config with the new token (10.2), copy SOUL.md (10.3)
-3. Set and store the API key (10.4)
-4. Add the route entry for `"<CHAT_ID>"` → `runner-<N>` under `gateway.profile_routes` (11) and
+3. Give the profile its own provider key (§9) — without it its first turn cannot run
+4. Set and store the API key (10.4)
+5. Add the route entry for `"<CHAT_ID>"` → `runner-<N>` under `gateway.profile_routes` (11) and
    run `nssm restart hermes-gateway`
-5. **Only now** add their chat ID to `TELEGRAM_ALLOWED_USERS` (8) and
+6. **Only now** add their chat ID to `TELEGRAM_ALLOWED_USERS` (8) and
    `nssm restart hermes-gateway` again
-6. Send them `https://<DOMAIN>/strava/connect/<N>` (it returns the Strava link)
-7. Ask them to message the bot "hi"; confirm a normal reply, not the decline text
-8. Ask them (or check yourself) to read a file under `$HH`; it must refuse (10.4)
+7. Send them `https://<DOMAIN>/strava/connect/<N>` (it returns the Strava link)
+8. Ask them to message the bot "hi"; confirm a normal reply, not the decline text
+9. Ask them (or check yourself) to read a file under `$HH`; it must refuse (10.4)
 
 ## 16. Remove a runner
 
@@ -624,6 +657,9 @@ Every key and command below was checked against the installed source, not just t
 | Starting a run | `POST /p/<profile>/v1/runs` body `{"input": "..."}` → **202** `{"run_id", "status": "started", "replayed"}` | `gateway/platforms/api_server_runs.py` `_handle_runs`, `_accepted_response` |
 | Getting the reply | `GET /p/<profile>/v1/runs/<run_id>` while `status` is `started`/`running`; the text is in `output` once `status` is `completed` (terminal: `completed`/`failed`/`cancelled`/`interrupted`) | `api_server_runs.py` `_handle_get_run`, `_set_run_status`; `output=result.get("final_response")` at `:986` |
 | Profile commands | `hermes profile create` / `list` / `delete` all exist; profiles live in `$HH\profiles\<name>` | `hermes profile --help`; `hermes_cli/profiles.py:432` |
+| Profile credentials | Never shared between profiles: a new profile needs the provider key copied into its own `.env`, and its own `API_SERVER_KEY` for `/p/<profile>/` | live first turn failed with `No API key found for provider 'openrouter'`; `gateway/run.py` per-profile secret scope |
+| `API_SERVER_ENABLED` | Documented but read by **no** code path; the listener starts when a usable `API_SERVER_KEY` (16+ chars) exists | `gateway/config_env.py` `_api_server()`; full-tree search for the name finds only docs and a settings list |
+| `.env` line endings | Must be LF: CRLF leaves a carriage return in every value, so paths and keys silently do nothing | observed on this install (Python text-mode write emits CRLF on Windows) |
 | Gateway service on Windows | `hermes gateway install` exists (creates a Windows Scheduled Task); NSSM is only an alternative | `hermes gateway --help`; `hermes gateway status` output |
 | Toolset allowlist | `platform_toolsets.<platform>` is the allowlist (a saved list is authoritative; MCP servers pass through as `mcp-<server>`/bare name). `agent.disabled_toolsets` is a global deny list applied **last** | `hermes_cli/tools_config.py` `_get_platform_tools`, `_merge_mcp_servers`; ran both against a sample config |
 | `mcp` as a toolset name | Not a toolset: `validate_toolset("mcp")` is `False`, so listing it disables nothing. Use the `no_mcp` sentinel to hide MCP | `toolsets.validate_toolset`; `_merge_mcp_servers` |
