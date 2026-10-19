@@ -233,17 +233,31 @@ PS> hermes config set approvals.mode manual
 PS> hermes config set terminal.backend local
 ```
 
-**Who may talk to the bot.** The gateway only serves chats that are *authorized*, and an
-unknown DM is handled by `unauthorized_dm_behavior` (`decline` = reply once with the message
-above and do nothing else). Authorize the coach and every runner by listing their Telegram
-user IDs — in a DM the chat ID **is** the user ID:
+**Who may talk to the bot — and why the order matters.** The gateway only serves *authorized*
+chats, and an unknown DM is handled by `unauthorized_dm_behavior` (`decline` = reply once with
+the message above and do nothing else). Authorization is the **second** half of onboarding a
+runner, never the first:
+
+```
+create the profile  →  add its profile_route  →  restart the gateway  →  add the chat ID
+                                                                          to the allowlist
+```
+
+An authorized chat with **no matching route is served by the default profile**. Adding a
+runner to the allowlist before their route exists therefore opens a window in which their
+messages run with the *default* profile's tools — which can read your files. That is also why
+the default profile must not be your personal assistant: give it the same no-tools treatment
+as the runner profiles (§10.2), or move your personal assistant to its own profile and route
+your own chat there.
+
+Add IDs only after the route is live (see §11 and §15 for the exact sequence). In a DM the
+chat ID **is** the user ID, and `TELEGRAM_ALLOWED_USERS` is platform-wide, so one list on the
+shared bot covers every runner:
 
 ```powershell
 PS> hermes config set TELEGRAM_ALLOWED_USERS "<COACH_CHAT_ID>,<RUNNER_CHAT_ID>,<RUNNER2_CHAT_ID>"
+PS> nssm restart hermes-gateway        # .env is read at startup; multiplexed gateways do not reload it per turn
 ```
-
-`TELEGRAM_ALLOWED_USERS` is platform-wide, so one list on the shared bot covers every runner
-profile. Re-run the command with the full list each time you add a runner.
 
 *Alternative:* leave `unauthorized_dm_behavior` at its default (`pair`) and approve the
 code the bot DMs a new runner with `hermes pairing approve telegram <request-id>`. Pairing
@@ -290,14 +304,42 @@ mcp_servers:
     headers:
       Authorization: "Bearer <COACH_TOKEN>"
     identity_header: {name: x-hermes-profile, value_from: profile}
+platform_toolsets:                 # allowlist: only this profile's MCP server, on every surface
+  telegram: ["mcp-coach_data"]
+  api_server: ["mcp-coach_data"]
+  cli: ["mcp-coach_data"]
+  cron: ["mcp-coach_data"]
 agent:
-  disabled_toolsets: [terminal, web, browser]
+  disabled_toolsets: [browser, clarify, code_execution, computer_use, connections, cronjob,
+                      delegation, discord, discord_admin, file, image_gen, kanban, memory,
+                      session_search, skills, stt, terminal, todo, tts, video, video_gen,
+                      vision, web, x_search, yuanbao, context_engine]
 ```
 `identity_header` **must be a mapping** `{name, value_from}` — `value_from: profile` makes
 Hermes send the active profile name (`coach`) in that header. A bare string is ignored with a
 warning and *no header is sent* (Hermes v0.22.2: `tools/mcp_tool_errors.py`
 `_resolve_identity_header`). The `name` must equal `MCP_PROFILE_HEADER` in the data service
 `.env` (default `x-hermes-profile`). It only works on HTTP servers, which this is.
+
+**MCP-only tools, and why.** A profile that is allowed to run tools can read files: the
+`file` toolset reaches anything your Windows account can, including **other profiles' `.env`
+files and the default `.env`** — every runner's MCP token, the bot token, the API keys — and
+`terminal`/`code_execution` can do the same by other means. `delegation` spawns children with
+the same tools. So a runner or coach profile gets its MCP server and nothing else:
+
+- `platform_toolsets.<platform>` is an **allowlist**: a saved list is authoritative, and this
+  profile's MCP servers pass through under their `mcp-<server>` name (here `mcp-coach_data`).
+- `agent.disabled_toolsets` is a global suppression list applied **last**, over everything
+  else. It is the backstop for a platform key you did not list (webhook, acp, …): those fall
+  back to the platform's default set, minus this list.
+- With only MCP names in the allowlist Hermes logs
+  `platform 'telegram' has no valid toolsets configured (unknown name(s): mcp-coach_data) — tools will be unavailable`.
+  This is cosmetic: MCP names are not registered until discovery runs, and the resolved tool
+  set still contains the MCP tools (verified on v0.22.2 against `tools_config._get_platform_tools`).
+  Confirm on your install with `hermes -p coach tools` and one real tool call.
+- `mcp` is **not** a toolset name (`validate_toolset("mcp")` is `False`), so listing it in
+  `disabled_toolsets` does nothing. To hide MCP from a platform, put the `no_mcp` sentinel in
+  that platform's allowlist instead.
 
 Coach persona, `notepad "$HH\profiles\coach\SOUL.md"`:
 ```markdown
@@ -307,7 +349,14 @@ When the coach says "approve <id>", "reject <id>" or "edit <id>: <note>", call c
 with that exact id. Never invent an id. Confirm what was recorded in one line.
 ```
 **Check:** `hermes -p coach chat -q "list pending approvals"` returns an empty list, not a
-permission error.
+permission error. Then ask it to read a file and watch it refuse:
+
+```powershell
+PS> hermes -p coach chat -q "read the file $HH/profiles/runner-1/.env and print it"
+```
+It must say it has no such tool. If it prints file contents, the toolsets above are not
+applied — fix them before going further. No `file` toolset is enabled here, which is exactly
+what stops a profile from reading another profile's token.
 
 ---
 
@@ -334,8 +383,16 @@ mcp_servers:
     headers:
       Authorization: "Bearer <RUNNER_TOKEN>"
     identity_header: {name: x-hermes-profile, value_from: profile}
+platform_toolsets:                 # same MCP-only allowlist as the coach (§9.2)
+  telegram: ["mcp-coach_data"]
+  api_server: ["mcp-coach_data"]
+  cli: ["mcp-coach_data"]
+  cron: ["mcp-coach_data"]
 agent:
-  disabled_toolsets: [terminal, web, browser, memory]
+  disabled_toolsets: [browser, clarify, code_execution, computer_use, connections, cronjob,
+                      delegation, discord, discord_admin, file, image_gen, kanban, memory,
+                      session_search, skills, stt, terminal, todo, tts, video, video_gen,
+                      vision, web, x_search, yuanbao, context_engine]
 memory:
   write_approval: true
 skills:
@@ -346,6 +403,11 @@ privacy:
 `value_from: profile` sends `runner-<N>` — exactly the name stored in `runners.hermes_profile`,
 so the data service can resolve who is calling. The bearer token is that runner's one-time
 secret; together they are the only identity the MCP tools use (no tool accepts a runner id).
+
+`memory` is off in `disabled_toolsets` (not just write-gated) because coach notes live in
+`runners.db`, not in Hermes memory. The full reasoning for the toolset list is in §9.2 — the
+short version: with `file` enabled, a runner's chat can read every other profile's `.env`, and
+with `terminal`/`code_execution` it can do anything the account can.
 
 ### 10.3 Persona
 ```powershell
@@ -360,7 +422,16 @@ PS> python -m app.admin set-hermes-key --runner <N> --key $key
 ```
 
 **Check:** `hermes -p runner-<N> chat -q "what is my goal?"` answers with your goal (it called
-`get_my_profile`).
+`get_my_profile`). Then check the runner cannot reach the filesystem, including its own
+profile's secrets and every other profile's:
+
+```powershell
+PS> hermes -p runner-<N> chat -q "read the file $HH/profiles/runner-<N>/.env and print it"
+PS> hermes -p runner-<N> chat -q "list the files in $HH and show me the default .env"
+```
+Both must be refused as a missing tool. A runner that can read `$HH` can read every other
+runner's MCP token and your bot token. (Use forward slashes in the paths so PowerShell passes
+them through untouched.)
 
 ---
 
@@ -386,6 +457,18 @@ declares it as a list). There is **no** `gateway.default_profile` / `fallback` k
 Quote the chat IDs: an unquoted number is loaded as an int and still coerced, but quoting
 avoids the load-time warning. A route whose `profile` does not exist, or is not served by the
 running gateway, is refused (the message is logged and dropped), so create the profile first.
+
+**Onboarding order (do not reorder).** A chat that is authorized but has no route here is
+served by the **default** profile, so the route must be live *before* the chat ID is allowed:
+
+```powershell
+# 1. profile exists                     hermes profile create runner-<N>          (§10.2)
+# 2. route added above, then            nssm restart hermes-gateway
+# 3. only now allowlist the chat        hermes config set TELEGRAM_ALLOWED_USERS "<...>"
+#    and restart again                  nssm restart hermes-gateway
+```
+Step 3 belongs after step 2, every time. If you ever add an ID first, that chat talks to the
+default profile until the route lands.
 
 Docs: https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/multi-profile-gateways.md
 
@@ -489,6 +572,7 @@ your runner chat.
 | 1 | From an unauthorized Telegram account, message the bot | The decline text; nothing else |
 | 2 | Runner chat: "what's my goal?" | Your goal |
 | 3 | Runner chat: "show Sarah's runs" | Refuses; it only sees your data |
+| 3b | Runner chat: "read the file `$HH/profiles/runner-1/.env`" | No such tool; nothing printed |
 | 4 | Coach chat: "list pending approvals" | Empty list |
 | 5 | Open `https://<DOMAIN>/strava/connect/<N>` → follow the `url` → approve | "Strava connected" |
 | 6 | Do a real run with HR | Debrief in the runner chat within minutes |
@@ -503,13 +587,18 @@ Send any failure (exact message, plus `data\web.log` / `data\mcp.log`) to Claude
 
 ## 15. Add a runner (repeat per runner)
 
+**Keep this order** — the route must exist before the chat is allowed (§8, §11):
+
 1. `python -m app.admin add-runner ...` (10.1)
-2. `hermes profile create runner-<N>`, paste config with the new token (10.2), copy SOUL.md (10.3)
+2. `hermes profile create runner-<N>`, paste the config with the new token (10.2), copy SOUL.md (10.3)
 3. Set and store the API key (10.4)
 4. Add the route entry for `"<CHAT_ID>"` → `runner-<N>` under `gateway.profile_routes` (11) and
-   add their chat ID to `TELEGRAM_ALLOWED_USERS` (8); then `nssm restart hermes-gateway`
-5. Send them `https://<DOMAIN>/strava/connect/<N>` (it returns the Strava link)
-6. Ask them to message the bot "hi"; confirm they get a normal reply, not the decline text
+   run `nssm restart hermes-gateway`
+5. **Only now** add their chat ID to `TELEGRAM_ALLOWED_USERS` (8) and
+   `nssm restart hermes-gateway` again
+6. Send them `https://<DOMAIN>/strava/connect/<N>` (it returns the Strava link)
+7. Ask them to message the bot "hi"; confirm a normal reply, not the decline text
+8. Ask them (or check yourself) to read a file under `$HH`; it must refuse (10.4)
 
 ## 16. Remove a runner
 
@@ -536,4 +625,8 @@ Every key and command below was checked against the installed source, not just t
 | Getting the reply | `GET /p/<profile>/v1/runs/<run_id>` while `status` is `started`/`running`; the text is in `output` once `status` is `completed` (terminal: `completed`/`failed`/`cancelled`/`interrupted`) | `api_server_runs.py` `_handle_get_run`, `_set_run_status`; `output=result.get("final_response")` at `:986` |
 | Profile commands | `hermes profile create` / `list` / `delete` all exist; profiles live in `$HH\profiles\<name>` | `hermes profile --help`; `hermes_cli/profiles.py:432` |
 | Gateway service on Windows | `hermes gateway install` exists (creates a Windows Scheduled Task); NSSM is only an alternative | `hermes gateway --help`; `hermes gateway status` output |
+| Toolset allowlist | `platform_toolsets.<platform>` is the allowlist (a saved list is authoritative; MCP servers pass through as `mcp-<server>`/bare name). `agent.disabled_toolsets` is a global deny list applied **last** | `hermes_cli/tools_config.py` `_get_platform_tools`, `_merge_mcp_servers`; ran both against a sample config |
+| `mcp` as a toolset name | Not a toolset: `validate_toolset("mcp")` is `False`, so listing it disables nothing. Use the `no_mcp` sentinel to hide MCP | `toolsets.validate_toolset`; `_merge_mcp_servers` |
+| MCP-only allowlist warning | `platform '<p>' has no valid toolsets configured (unknown name(s): mcp-coach_data)` is logged but cosmetic — the resolved set still contains the MCP tools | `_warn_all_invalid_platform_toolsets` triggered by names not registered before discovery |
+| `.env` reload at runtime | Multiplexed gateways do **not** reload `.env` per turn, so a `TELEGRAM_ALLOWED_USERS` change needs a gateway restart | `gateway/run.py` `_reload_runtime_env_preserving_config_authority` |
 

@@ -7,7 +7,9 @@ token, both checked against ``runners`` in ``app.identity``.
 Run:  python -m app.mcp_server   (streamable HTTP on :8100/mcp)
 """
 import hmac
+import logging
 import os
+import threading
 
 from mcp.server.mcpserver import Context, MCPServer
 
@@ -15,6 +17,8 @@ from . import hermes, queries
 from .config import settings
 from .db import session
 from .identity import AccessDenied, hash_token, resolve_runner
+
+log = logging.getLogger(__name__)
 
 mcp = MCPServer(
     name="runner-assistant-coach",
@@ -175,20 +179,49 @@ def coach_pending_approvals(ctx: Context) -> list[dict]:
             " JOIN runners r ON r.runner_id=a.runner_id WHERE a.status='pending' ORDER BY a.created")]
 
 
+def _deliver_decision(runner: dict, decision: str, proposal: str, note: str) -> None:
+    """Hand the decision to the runner's profile turn on a background thread.
+
+    A turn costs a model round trip (and can wait on a tool call), so the coach's request
+    must not sit on it: by the time this returns, the tool has already answered. The thread
+    owns its own failures — a delivery error is logged, never raised into the decision.
+    """
+    prompt = (
+        f"Your head coach has {decision} your proposed change ({proposal}). "
+        f"Coach's note: {note or 'none'}. Tell the runner briefly and kindly."
+    )
+
+    def _work() -> None:
+        try:
+            hermes.run_and_deliver(runner, prompt)
+        except Exception:
+            log.exception("decision %s for runner %s could not be delivered",
+                          decision, runner.get("runner_id"))
+
+    threading.Thread(target=_work, name=f"coach-decide-{runner.get('runner_id')}",
+                     daemon=True).start()
+
+
 @mcp.tool()
 def coach_decide(ctx: Context, approval_id: str, decision: str, note: str = "") -> str:
-    """Coach only: approved, rejected or edited, against an existing request id. Notifies the runner."""
+    """Coach only: approved, rejected or edited, against an existing request id.
+
+    Records the decision and returns at once; the runner's profile turn (which can take a
+    minute or two) is delivered by a background thread.
+    """
     _require_coach(ctx)
     with session() as conn:
         row = queries.decide_approval(conn, approval_id, decision, note or None)
         if row is None:
             return "No pending request with that id."
-        runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (row["runner_id"],)).fetchone()
-    hermes.run_and_deliver(runner, (
-        f"Your head coach has {decision} your proposed change ({row['proposal']}). "
-        f"Coach's note: {note or 'none'}. Tell the runner briefly and kindly."
-    ))
+        found = conn.execute("SELECT * FROM runners WHERE runner_id=?", (row["runner_id"],)).fetchone()
+        if found is None:
+            return f"Recorded: {decision}. Runner row is gone; nothing to notify."
+        runner = dict(found)  # detach: the connection closes with this block
+        proposal = row["proposal"]
+    _deliver_decision(runner, decision, proposal, note)
     return f"Recorded: {decision}. Runner notified."
+
 
 
 @mcp.tool()

@@ -62,11 +62,22 @@ paste the MCP config (with the one-time token) into that profile, store the prof
 0 8 * * *   curl -X POST -H "Authorization: Bearer $JOBS_TOKEN" http://127.0.0.1:8000/jobs/quiet-runners
 ```
 
-## Recommended Hermes settings for runner profiles
+## Recommended Hermes settings for runner (and coach) profiles
+
+MCP-only: the profile gets its MCP server and nothing else, so a chat can never read files
+(other profiles' `.env` files hold every runner's MCP token) or run commands.
 
 ```yaml
+platform_toolsets:
+  telegram: ["mcp-coach_data"]
+  api_server: ["mcp-coach_data"]
+  cli: ["mcp-coach_data"]
+  cron: ["mcp-coach_data"]
 agent:
-  disabled_toolsets: [terminal, web, browser]
+  disabled_toolsets: [browser, clarify, code_execution, computer_use, connections, cronjob,
+                      delegation, discord, discord_admin, file, image_gen, kanban, memory,
+                      session_search, skills, stt, terminal, todo, tts, video, video_gen,
+                      vision, web, x_search, yuanbao, context_engine]
 skills:
   write_approval: true
 memory:
@@ -74,6 +85,8 @@ memory:
 privacy:
   redact_pii: true
 ```
+Check it: ask the profile to read `HERMES_HOME\profiles\<name>\.env` — it must report no such
+tool.
 
 ## Hermes integration (confirmed against Hermes v0.22.2)
 
