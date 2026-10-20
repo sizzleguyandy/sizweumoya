@@ -139,3 +139,98 @@ Keywords: `weather`, `energy`, `sleep`, `niggle`, `hr bad`, `treadmill`.
 7. Reports saved with their basis; drill-down tools and glossary
 8. 7-day injury check-in
 9. Runner data commands: show my data, delete my data
+
+## 7. Free version goals
+
+Three jobs: show whether the runner is progressing, catch overtraining and injury risk early,
+and get them to race day fresh.
+
+### 7.1 Progress status (never red)
+
+| Status | Meaning | Sarah says |
+| --- | --- | --- |
+| Green | Progressing | "You're getting fitter." |
+| Yellow | Holding steady | "Holding steady; gains come in waves." |
+| Grey | No progress yet, or a slight dip | "No change this month; usually tiredness or a busy few weeks." |
+
+Signals and stagnation rules:
+
+| Signal | Progress | Stagnation |
+| --- | --- | --- |
+| Easy pace at same HR (monthly) | Faster | Unchanged 2–3 months running |
+| Weekly distance (4-week average) | Gradually rising | Flat 6+ weeks |
+| Longest run | Growing towards race needs | Same 6+ weeks |
+| Easy/hard balance | Close to 80/20 | Mostly zone 3 |
+| Hevy lifts | Weight or reps up | Same weight 4+ sessions |
+
+On stagnation Sarah names the likely reason from the data and Coach Andy is told.
+
+### 7.2 Load and injury flags (weekly traffic light)
+
+Signs:
+- Weekly distance up more than 10% (5% in careful mode)
+- Last week above 1.5x the 4-week average
+- 7+ days in a row without rest
+- Easy running below 70%
+- Heart rate higher at the same pace for 1–2 weeks
+- Fitness dipping while distance rises
+- Repeated low energy / poor sleep in Strava notes, or high perceived effort on easy runs
+- Any niggle (chat or Strava note); long run above ~35% of the week; sudden stop after a hard week
+
+| Level | Trigger | Who hears |
+| --- | --- | --- |
+| Green | No signs | Nobody; normal report |
+| Amber | One or two signs | **Runner only**, gently, in the weekly summary |
+| Red | Several signs, or a niggle on high load | **Coach Andy immediately**; runner gets a kind, calm message |
+
+Amber example: "You've done three hard weeks back to back and your heart rate is running a bit
+higher than usual on easy runs. That's usually your body asking for an easier week."
+
+### 7.3 Race taper (always suggested when a race is planned)
+
+**Base mileage** = average of the last 3 full weeks before the taper, ignoring unusually light weeks.
+
+| Race | Taper starts | Week −3 | Week −2 | Race week (excl. race) | Last long run |
+| --- | --- | --- | --- | --- | --- |
+| 5K | 7 days out | — | — | 70% of base | Normal, 7+ days out |
+| 10K | 10 days out | — | 85% of base | 60% of base | 10 days out, ~75% of usual |
+| Half marathon | 14 days out | — | 75% of base | 50% of base | 10–12 days out, ~70% of usual |
+| Marathon | 21 days out | 80% of base | 65% of base | 40% of base | 21 days out: the longest run |
+
+Rules:
+- Keep 1–2 short race-pace efforts each taper week (cut distance, not all intensity).
+- Base under 20 km/week: shorter taper (half 7–10 days, marathon 14 days).
+- Careful mode: a further 10% volume reduction.
+- Sarah tracks each week against target, sends a race-week note (sleep, fuelling, pacing) and a
+  post-race message (result, personal best, easy recovery days).
+- Coach Andy gets a copy of every suggested taper; a paid plan overrides it.
+
+Example (half marathon, base 40 km/week):
+> Two weeks to Durban, so this is where we ease off and let the work sink in. Based on your recent
+> average of 40 km a week, here's a simple taper. This week: about 30 km, with your last longer run
+> around 14 km. Race week: about 20 km, all easy apart from a couple of short bursts at race pace.
+> The fitness is already built; now it's about arriving fresh.
+
+### 7.4 Gauges (text, first version)
+
+Sent inside `<pre>` (monospace) in Telegram, ten blocks wide (▰ filled, ▱ empty):
+
+```
+Fitness   ▰▰▰▰▰▰▰▱▱▱  Progressing
+Load      ▰▰▰▰▱▱▱▱▱▱  Comfortable
+Taper     ▰▰▰▰▰▰▰▰▱▱  On track
+```
+
+- Fitness: green ≥ 7 blocks, yellow 4–6, grey ≤ 3 (driven by the progress status).
+- Load: blocks scale with last week vs 4-week average; labels Easy / Comfortable / High (amber) / Very high (red).
+- Taper: share of the taper plan completed; labels On track / Ease off more / Running light.
+
+Later: animated speedometer image (monthly report, taper start), then a Telegram mini app
+dashboard (paid version).
+
+### 7.5 Build list additions
+
+10. Progress status and stagnation detection
+11. Weekly load/injury traffic light with amber → runner, red → Coach Andy
+12. Race storage and taper calculator, weekly taper tracking, race-week and post-race messages
+13. Text gauges in weekly and monthly reports
