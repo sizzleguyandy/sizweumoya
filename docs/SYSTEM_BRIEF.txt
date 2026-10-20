@@ -1,0 +1,376 @@
+SIZWE UMOYA - RUNNER ASSISTANT COACH
+Full system brief (free version)
+Updated: 20 October 2026
+Owner: Coach Andy (Andrew Hammond)
+
+======================================================================
+1. WHAT IT IS
+======================================================================
+
+A coach-led running service delivered through Telegram. Coach Andy is the
+head coach and writes every training plan. Sarah, an AI assistant coach,
+is his second in command: she reads each runner's Strava data, gives
+feedback after every run and strength session, sends weekly summaries
+and monthly progress reports, and flags anything Coach Andy should see.
+
+The AI never writes or changes plans, never diagnoses injuries, and
+never lets a runner change their own stats.
+
+Free version: feedback, progress tracking, load/injury flags, race taper
+suggestions, unlimited running chat.
+Paid add-ons (later): Run Programme, Strength Programme, Injury Recovery,
+all written by Coach Andy and delivered/tracked by Sarah.
+
+======================================================================
+2. CURRENT STATUS (20 Oct 2026)
+======================================================================
+
+DONE AND TESTED
+- Data service (Python): Strava connection, Hevy parsing, stats,
+  runners.db, MCP tools with identity check. 42 automated tests pass.
+- Code on GitHub: sizzleguyandy/sizweumoya (branch main).
+- Hermes Agent on Coach Andy's Windows PC:
+    - coach profile (Coach Andy's Telegram 1491755393)
+    - runner-1 test profile (second Telegram 8900567635, "Andy Test")
+    - profile routing, MCP-only tool lockdown, API server
+- Telegram bot @SizweUmoya_bot live; coach and runner chats tested:
+    goal lookup, coach-only tools refused for runners, injury alert flow.
+- Domain sizweumoya.com on Cloudflare; coach.sizweumoya.com tunnel to
+  the PC running as a Windows service. Only /strava/* and /health public.
+- Strava API app created; webhook registered (id 378009);
+  test runner Strava connected.
+
+NOT YET DONE
+- First real activity test (run debrief, strength debrief).
+- Data service, MCP server and Hermes gateway as auto-start services
+  (currently session processes).
+- Weekly / fitness / quiet-runner scheduled jobs.
+- Everything in section 12 (onboarding, gauges, taper, flags etc.).
+- Sarah's new persona copied into runner profiles.
+
+======================================================================
+3. ARCHITECTURE
+======================================================================
+
+  Strava --HTTPS--> Cloudflare tunnel (coach.sizweumoya.com)
+                        |
+                        v
+              Data service (127.0.0.1:8000)  ---- runners.db
+                |        |
+                |        +-- MCP tools server (127.0.0.1:8100)
+                |                 ^
+                v                 |  (profile name + secret token)
+        Hermes API server --> Hermes gateway (multiplexed profiles)
+          (127.0.0.1:8642)        |
+                                  +-- coach profile   <- Coach Andy
+                                  +-- runner-N profile <- each runner
+                                  |
+                              Telegram @SizweUmoya_bot
+
+Components
+- Data service: Strava OAuth + token refresh, webhook, activity fetch,
+  Hevy parsing, stats and rules, runners.db, scheduled job endpoints.
+- MCP server: the only way the AI reaches data. Each call is tied to the
+  calling profile (identity header + per-profile token). No tool takes a
+  runner id, so a runner can never reach another runner's data.
+- Hermes: one profile per runner (own memory, sessions, keys) and one
+  coach profile. Runner/coach profiles are locked to MCP tools only
+  (no files, terminal, web, code).
+- Hermes API server: the data service starts a turn in a runner's profile
+  (POST /p/<profile>/v1/runs), polls for the reply, then sends it to
+  Telegram itself.
+- Cloudflare tunnel: gives Strava a public HTTPS address without opening
+  the home network.
+
+Machine: Coach Andy's Windows PC. It must stay on and awake.
+Hermes home: C:\Users\andre\AppData\Local\hermes
+Repo: C:\Users\andre\sizweumoya
+
+======================================================================
+4. ROLES
+======================================================================
+
+Coach Andy                         Sarah (AI)
+- Writes all plans                 - Delivers and tracks plans (paid)
+- Approves/edits/rejects changes   - Proposes changes, waits
+- Decides on injuries              - Logs health notes, alerts Coach Andy
+- Only one who can override data   - Never changes stats
+- Receives red flags, new-runner   - Sends debriefs, summaries, progress
+  summaries, quiet-runner alerts     reports, taper suggestions, chat
+
+Escalation rule: anything that changes what a runner should do next goes
+to Coach Andy first.
+
+======================================================================
+5. PRODUCT DECISIONS
+======================================================================
+
+- Names: Coach Andy (head coach), Sarah (assistant).
+- Weekly summary: Sunday evening.
+- Tone: supportive, natural language, almost no emojis, one tip at most.
+- Short runs (under 3 km or under 20 min): no debrief; stored and counted
+  in the weekly summary.
+- Chat: unlimited in the free version; any running topic.
+- Stats: read-only for runners; only Coach Andy can override.
+- Extra context: optional Strava notes, never required.
+- Taper: always suggested when a race is planned.
+- Flags: amber to runner only; red to Coach Andy.
+- Progress colours: green / yellow / grey (never red).
+- Visuals: text gauges first.
+
+======================================================================
+6. ONBOARDING
+======================================================================
+
+1. Runner messages the bot -> polite "private bot, ask Coach Andy".
+2. Coach Andy runs one onboard command, which does, in this safe order:
+   register runner -> create profile -> add route -> restart gateway ->
+   add to allowed list -> restart. (Never allow before the route exists:
+   unrouted chats reach the default profile.)
+3. Sarah sends the welcome with the Strava link.
+4. Strava connects -> import last 8 weeks of runs and Hevy sessions,
+   read HR zones from Strava.
+5. Two questions only: any races planned? any injuries or niggles?
+6. Sarah sends the baseline snapshot; Coach Andy gets a new-runner summary.
+7. Normal feedback starts.
+
+Injury at any time: health note, Coach Andy alerted, careful mode on
+(mileage warning at +5% instead of +10%, extra 10% taper reduction,
+easy-running tips), check-in after 7 days.
+
+======================================================================
+7. SARAH'S VOICE AND MESSAGES
+======================================================================
+
+Voice: warm and encouraging; praise effort before advice; plain language;
+numbers only where they help; one idea per message; a tip is a
+suggestion, never an order; a bad week is a lighter week.
+
+WELCOME
+"Hi Tom, welcome! I'm Sarah, Coach Andy's assistant. After each run and
+strength session I'll send you a short note on how it went, plus a weekly
+summary on Sunday evenings and a fitness check once a month. Coach Andy
+looks after your training plans; I'm here to keep an eye on things and
+help along the way. To get started, connect your Strava here: [link].
+I'll only use your training data for coaching, and you can ask me to
+delete it any time."
+
+AFTER STRAVA CONNECTS
+"Thanks, you're connected. I've had a look at your last eight weeks. Two
+quick questions before I share what I found: do you have any races
+coming up?"  /  "And are you carrying any injuries or niggles at the
+moment?"
+
+BASELINE
+"Here's where you're at. Over the last eight weeks you've averaged about
+28 km a week across three or four runs, with a longest run of 16 km.
+Around three quarters of your running has been easy, which is a good
+base. Your easy pace sits around 6:10 per km at a heart rate of about
+142. With the Durban 10K six weeks away, the one thing I'd focus on is
+keeping those easy days genuinely easy."
+
+RUN DEBRIEF
+"Nice one, 8.2 km at 5:42 per km. Most of that sat comfortably in zone 2,
+exactly where an easy run should be. Your heart rate crept up a little in
+the second half, which is normal. Next time try starting the first couple
+of kilometres a touch slower, and you'll likely feel stronger at the end."
+
+STRENGTH DEBRIEF
+"Good session. Squats are up to 65 kg for 3x8, five kilos more than last
+time, so that's real progress. RDLs and calf raises held steady. I'd stay
+at 65 on squats next time and make every rep feel solid before adding
+more."
+
+WEEKLY SUMMARY (Sunday evening)
+"Here's your week. You ran 32 km over four runs, plus two short
+shakeouts, and fitted in two strength sessions, which is great
+consistency. That's a 14% jump on last week, so I'd hold around this
+level next week and let your body catch up. About 72% of your running was
+easy; the sweet spot is closer to 80. Five weeks to Durban."
+
+  Fitness   ▰▰▰▰▰▰▰▱▱▱  Progressing
+  Load      ▰▰▰▰▰▰▰▱▱▱  High
+  Taper     -
+
+MONTHLY PROGRESS
+- Green:  "Your easy pace at the same heart rate has dropped from 6:15 to
+           6:02 per km. The same effort is now carrying you faster."
+- Yellow: "Your fitness is holding steady this month. Gains come in
+           waves; keep stacking consistent weeks."
+- Grey:   "No change this month. That's usually tiredness, heat or a busy
+           few weeks rather than lost fitness."
+- Not enough data: "I need at least three easy runs in each four-week
+           window to tell."
+
+INJURY OR NIGGLE
+"Sorry to hear that. Can you tell me a bit more: where exactly, when it
+started, and whether it's a dull ache or something sharper? I've let
+Coach Andy know. Until Coach Andy has had a look, I'd ease off rather
+than push through. If it's sharp, swollen, or changing the way you run,
+it's worth seeing a physio."
+7 days later: "Hi Tom, just checking in. How's the calf feeling?"
+
+PLAN QUESTION
+"That's one for Coach Andy. Want me to pass your question on?"
+
+TO COACH ANDY
+- New runner: "Tom is set up. 28 km a week, 74% easy, strength once a
+  week. Racing the Durban 10K in 6 weeks. Mentioned a sore left
+  Achilles, so careful mode is on."
+- Red flag: "Red flag for Tom: distance up 35%, no rest day for 9 days,
+  and a sore left calf."
+- Quiet runners: "No activity for 7+ days: Tom, Lisa."
+
+======================================================================
+8. PROGRESS, STAGNATION AND FLAGS
+======================================================================
+
+PROGRESS STATUS (never red)
+  Green  - Progressing
+  Yellow - Holding steady
+  Grey   - No progress yet, or a slight dip
+
+Signals:
+  Easy pace at same HR (monthly)   progress: faster | stagnant: same 2-3 months
+  Weekly distance (4-week avg)     progress: rising | stagnant: flat 6+ weeks
+  Longest run                      progress: growing| stagnant: same 6+ weeks
+  Easy/hard balance                good: ~80/20     | stagnant: mostly zone 3
+  Hevy lifts                       progress: up     | stagnant: same 4+ sessions
+On stagnation Sarah names the likely reason; Coach Andy is told.
+
+LOAD AND INJURY FLAGS (weekly traffic light)
+Signs:
+- weekly distance up >10% (>5% in careful mode)
+- last week >1.5x the 4-week average
+- 7+ days in a row without rest
+- easy running <70%
+- heart rate higher at the same pace for 1-2 weeks
+- fitness dipping while distance rises
+- repeated low energy / poor sleep notes; high effort on easy runs
+- any niggle; long run >~35% of the week; sudden stop after a hard week
+Levels:
+  Green - no signs - normal report only
+  Amber - one or two signs - runner only, gently, in weekly summary
+  Red   - several signs, or niggle on high load - Coach Andy immediately,
+          runner gets a calm message
+
+======================================================================
+9. RACE TAPER (always suggested when a race is planned)
+======================================================================
+
+Base mileage = average of the last 3 full weeks before the taper,
+ignoring unusually light weeks.
+
+Race       Starts      Week -3  Week -2  Race week*  Last long run
+5K         7 days out  -        -        70% base    normal, 7+ days out
+10K        10 days out -        85%      60%         10 days out, ~75%
+Half       14 days out -        75%      50%         10-12 days out, ~70%
+Marathon   21 days out 80%      65%      40%         21 days out (longest)
+* race week excludes the race itself
+
+Rules:
+- Keep 1-2 short race-pace efforts each taper week.
+- Base under 20 km/week: shorter taper (half 7-10 days, marathon 14).
+- Careful mode: further 10% reduction.
+- Weekly tracking against target; race-week note (sleep, fuelling,
+  pacing); post-race message (result, PB, easy recovery).
+- Coach Andy gets a copy of every taper; a paid plan overrides it.
+
+Example (half marathon, base 40 km):
+"Two weeks to Durban, so this is where we ease off and let the work sink
+in. Based on your recent average of 40 km a week, here's a simple taper.
+This week: about 30 km, with your last longer run around 14 km. Race
+week: about 20 km, all easy apart from a couple of short bursts at race
+pace. The fitness is already built; now it's about arriving fresh."
+
+======================================================================
+10. QUESTIONS ABOUT REPORTS AND DATA RULES
+======================================================================
+
+- Every report is saved with what it was based on, so a runner can reply
+  "why?" and Sarah explains with the real numbers.
+- Drill-downs: run splits per km, the week's easy/hard breakdown,
+  fitness-check workings, HR zones, plain-English glossary.
+- Disagreement: acknowledge, explain the numbers, offer to pass to Coach
+  Andy; repeated pushback is flagged.
+- Runners CANNOT change stats. Sarah suggests a Strava note or passes it
+  to Coach Andy, who decides.
+
+OPTIONAL STRAVA NOTES (extra context, never homework)
+- Description: e.g. "weather: hot. energy: 2. sleep: poor."
+- Perceived exertion (1-10), workout type (race/long run/workout),
+  treadmill toggle, private notes.
+- Keywords: weather, energy, sleep, niggle, hr bad, treadmill.
+- niggle -> injury flow; hr bad -> flagged to Coach Andy (not excluded);
+  hot -> no drift tip, less weight in fitness check.
+- Edits after a debrief trigger a re-read and possible follow-up.
+- Mentioned once at onboarding, then only when a run looked unusual.
+
+======================================================================
+11. CHAT
+======================================================================
+
+Runners can chat about any running topic: training ideas, pacing, race
+nerves, kit, fuelling, recovery, sleep, motivation, their own data.
+Empathy before analysis after a bad run. Never writes plans, never
+diagnoses, never discusses other runners, gently steers away from
+unrelated topics. Unlimited in the free version.
+
+Telegram command menu (planned, via BotFather /setcommands):
+  /stats /fitness /lastrun /strength /goal /help
+  coach: /approvals /alerts
+(Waiting on a Hermes check of how slash commands and buttons work.)
+
+======================================================================
+12. BUILD LIST (free version, not started)
+======================================================================
+
+ 1. onboard / offboard commands automating the safe order
+ 2. Welcome sent by the onboard command
+ 3. Tools to save consent, races, injury answers, careful-mode flag
+ 4. Strava connect -> 8-week backfill, HR zones, baseline,
+    new-runner summary to Coach Andy
+ 5. Short-run rule (no debrief under 3 km / 20 min)
+ 6. Read Strava description, perceived exertion, workout type,
+    treadmill flag, private notes
+ 7. Reports saved with their basis; drill-down tools and glossary
+ 8. 7-day injury check-in
+ 9. Runner data commands: show my data, delete my data
+10. Progress status and stagnation detection
+11. Weekly load/injury traffic light (amber -> runner, red -> Coach Andy)
+12. Race storage, taper calculator, weekly taper tracking,
+    race-week and post-race messages
+13. Text gauges in weekly and monthly reports
+
+Infrastructure still to do:
+- Install data service, MCP server and Hermes gateway as auto-start
+  Windows services (NSSM / Task Scheduler)
+- Task Scheduler jobs: weekly (Sunday evening), fitness (4-weekly),
+  quiet runners (daily), nightly runners.db backup
+- Copy Sarah's SOUL.md into every runner profile
+- First real run and Hevy test
+
+======================================================================
+13. RISKS AND CONSTRAINTS
+======================================================================
+
+- Strava Standard tier: max 10 athletes, Strava subscription required.
+  Apply for Extended Access before growing past the beta.
+- Read the Strava API Agreement and Policy (AI use, storage, deletion).
+- The PC must stay on; if it is off, debriefs stop and Strava events
+  during the outage are missed (the backfill will cover gaps).
+- Each new Hermes profile needs the model API key copied in.
+- .env must use LF line endings.
+- Health data: consent at onboarding, delete on request.
+- Load-test Hermes before scaling past ~10 runners.
+
+======================================================================
+14. KEY REFERENCES
+======================================================================
+
+- Repo: https://github.com/sizzleguyandy/sizweumoya
+- Build guide: docs/HERMES_BUILD.md
+- Free version spec: docs/FREE_VERSION_SPEC.md
+- Persona: hermes/SOUL.md
+- Bot: @SizweUmoya_bot
+- Public endpoint: https://coach.sizweumoya.com (Strava only)
