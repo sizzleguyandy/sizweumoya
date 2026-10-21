@@ -6,6 +6,7 @@
   python -m app.admin coach-token
   python -m app.admin delete-runner --runner 1
   python -m app.admin reset-runner --runner 1 --name Andy --tier full
+  python -m app.admin set-zones --runner 1 --zones 132,144,152,162 [--max-hr 184] [--easy-cap 138]
   python -m app.admin import-tracker --runner 1 --file tracker.xlsx [--replace]
 """
 import argparse
@@ -51,6 +52,11 @@ def main() -> None:
     r.add_argument("--runner", type=int, required=True)
     r.add_argument("--name")
     r.add_argument("--tier")
+    z = sub.add_parser("set-zones", help="Coach Andy's override: locks the zones")
+    z.add_argument("--runner", type=int, required=True)
+    z.add_argument("--zones", required=True, help="upper bounds of Z1-Z4, e.g. 132,144,152,162")
+    z.add_argument("--max-hr", type=int)
+    z.add_argument("--easy-cap", type=int)
     t = sub.add_parser("import-tracker")
     t.add_argument("--runner", type=int, required=True)
     t.add_argument("--file", required=True)
@@ -104,6 +110,20 @@ def main() -> None:
         conn.commit()
         print("Cleared:", cleared or "nothing")
         print("Profile, route, token and API key are unchanged.")
+    elif args.cmd == "set-zones":
+        zones = [int(x) for x in args.zones.split(",")]
+        if len(zones) != 4 or zones != sorted(zones) or not 80 <= zones[0] <= zones[-1] <= 220:
+            raise SystemExit("give four rising upper bounds for Z1-Z4, e.g. 132,144,152,162")
+        conn.execute("UPDATE runners SET hr_zones=?, zones_locked=1 WHERE runner_id=?",
+                     (json.dumps(zones), args.runner))
+        if args.max_hr:
+            conn.execute("UPDATE runners SET max_hr=? WHERE runner_id=?", (args.max_hr, args.runner))
+        if args.easy_cap:
+            conn.execute("UPDATE runners SET easy_hr_cap=? WHERE runner_id=?", (args.easy_cap, args.runner))
+        conn.commit()
+        print(dict(conn.execute("SELECT name, hr_zones, max_hr, easy_hr_cap, zones_locked FROM runners"
+                                " WHERE runner_id=?", (args.runner,)).fetchone()))
+        print("Applies to runs stored from now on. Runs already stored keep their zone times.")
     elif args.cmd == "import-tracker":
         runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (args.runner,)).fetchone()
         if runner is None:
