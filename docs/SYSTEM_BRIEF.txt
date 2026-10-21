@@ -1,6 +1,6 @@
 SIZWE UMOYA - RUNNER ASSISTANT COACH
 Full system brief (free version)
-Updated: 20 October 2026
+Updated: 21 October 2026
 Owner: Coach Andy (Andrew Hammond)
 
 ======================================================================
@@ -9,7 +9,8 @@ Owner: Coach Andy (Andrew Hammond)
 
 A coach-led running service delivered through Telegram. Coach Andy is the
 head coach and writes every training plan. Sarah, an AI assistant coach,
-is his second in command: she reads each runner's Strava data, gives
+is the second in command: she reads the activity files each runner sends
+(.fit from their watch, or a Garmin .zip) and typed gym sessions, gives
 feedback after every run and strength session, sends weekly summaries
 and monthly progress reports, and flags anything Coach Andy should see.
 
@@ -22,70 +23,72 @@ Paid add-ons (later): Run Programme, Strength Programme, Injury Recovery,
 all written by Coach Andy and delivered/tracked by Sarah.
 
 ======================================================================
-2. CURRENT STATUS (20 Oct 2026)
+2. CURRENT STATUS (21 Oct 2026)
 ======================================================================
 
 DONE AND TESTED
-- Data service (Python): Strava connection, Hevy parsing, stats,
-  runners.db, MCP tools with identity check. 42 automated tests pass.
-- Code on GitHub: sizzleguyandy/sizweumoya (branch main).
-- Hermes Agent on Coach Andy's Windows PC:
-    - coach profile (Coach Andy's Telegram 1491755393)
-    - runner-1 test profile (second Telegram 8900567635, "Andy Test")
-    - profile routing, MCP-only tool lockdown, API server
-- Telegram bot @SizweUmoya_bot live; coach and runner chats tested:
-    goal lookup, coach-only tools refused for runners, injury alert flow.
-- Domain sizweumoya.com on Cloudflare; coach.sizweumoya.com tunnel to
-  the PC running as a Windows service. Only /strava/* and /health public.
-- Strava API app created; webhook registered (id 378009);
-  test runner Strava connected.
+- Data source switched from Strava to runner-sent files (Strava's API Policy
+  forbids using its data in an AI application). Runners send .fit files or a
+  Garmin .zip to the bot, and can type gym sessions ("Squat 3x8 60kg").
+- Data service (Python): .fit reader, upload safety checks, stats, runners.db,
+  MCP tools with identity check. 54 automated tests pass. Branch main, 32b13a7.
+- Live checks on the PC all passed: run file -> debrief; same file again ->
+  "already have that one"; zip of 4 runs -> baseline snapshot; typed workout
+  stored; .txt refused (and a niggle in it triggered the injury flow);
+  another runner's file refused.
+- Hermes on Windows: coach profile (1491755393), runner-1 test profile
+  (8900567635), routing, MCP-only tool lockdown, API server.
+- Telegram bot @SizweUmoya_bot live.
+- Cloudflare tunnel now exposes only /health (nothing else reachable).
 
 NOT YET DONE
-- First real activity test (run debrief, strength debrief).
-- Data service, MCP server and Hermes gateway as auto-start services
-  (currently session processes).
-- Weekly / fitness / quiet-runner scheduled jobs.
-- Everything in section 12 (onboarding, gauges, taper, flags etc.).
-- Sarah's new persona copied into runner profiles.
-
+- Data service, MCP server, gateway and tunnel as auto-start services.
+- Scheduled jobs (Sunday weekly summary, 4-weekly fitness, quiet runners,
+  nightly backup).
+- Stop interim "let me check..." messages reaching Telegram.
+- Rotate secrets that were shown in a transcript.
+- Delete the old Strava app; rename the bot from "TR3D".
+- Everything in section 12.
 ======================================================================
 3. ARCHITECTURE
 ======================================================================
 
-  Strava --HTTPS--> Cloudflare tunnel (coach.sizweumoya.com)
+  Runner's watch -> .fit / .zip file  (or typed gym session)
                         |
                         v
-              Data service (127.0.0.1:8000)  ---- runners.db
-                |        |
-                |        +-- MCP tools server (127.0.0.1:8100)
-                |                 ^
-                v                 |  (profile name + secret token)
-        Hermes API server --> Hermes gateway (multiplexed profiles)
-          (127.0.0.1:8642)        |
-                                  +-- coach profile   <- Coach Andy
-                                  +-- runner-N profile <- each runner
-                                  |
-                              Telegram @SizweUmoya_bot
+            Telegram @SizweUmoya_bot
+                        |
+                        v
+        Hermes gateway (multiplexed profiles)
+          +-- runner-N profile  (each runner; own folder for their files)
+          +-- coach profile     (Coach Andy)
+                        |  MCP tools (profile name + secret token)
+                        v
+          MCP server (127.0.0.1:8100) --- runners.db
+                        |
+          Data service (127.0.0.1:8000): health, scheduled jobs; starts
+          turns in a runner's profile via the Hermes API server (:8642)
+
+How a file is stored
+1. Runner sends the file; Hermes saves it in that runner's own profile folder
+   (...\hermes\profiles\runner-N\cache\documents\) and gives Sarah the path.
+2. Sarah calls submit_activity_file(path, caption).
+3. The server accepts the path only if it is inside the folder of the
+   authenticated profile, .fit or .zip, max 25 MB; zips read in memory.
+4. Each file is identified by its SHA-256, so re-sending is harmless.
+5. Runs: zones, drift, run type (caption "race"/"intervals"/"long"),
+   treadmill flag. Watch strength sessions: sets, reps, weight.
+6. Max HR rises automatically from files unless Coach Andy locked the zones.
 
 Components
-- Data service: Strava OAuth + token refresh, webhook, activity fetch,
-  Hevy parsing, stats and rules, runners.db, scheduled job endpoints.
-- MCP server: the only way the AI reaches data. Each call is tied to the
-  calling profile (identity header + per-profile token). No tool takes a
-  runner id, so a runner can never reach another runner's data.
-- Hermes: one profile per runner (own memory, sessions, keys) and one
-  coach profile. Runner/coach profiles are locked to MCP tools only
-  (no files, terminal, web, code).
-- Hermes API server: the data service starts a turn in a runner's profile
-  (POST /p/<profile>/v1/runs), polls for the reply, then sends it to
-  Telegram itself.
-- Cloudflare tunnel: gives Strava a public HTTPS address without opening
-  the home network.
+- MCP server: the only way the AI reaches data. No tool takes a runner id.
+- Hermes: one profile per runner and one coach profile, locked to MCP tools
+  only (no files, terminal, web, code).
+- Cloudflare tunnel: only /health is public (useful for outside monitoring).
 
 Machine: Coach Andy's Windows PC. It must stay on and awake.
 Hermes home: C:\Users\andre\AppData\Local\hermes
 Repo: C:\Users\andre\sizweumoya
-
 ======================================================================
 4. ROLES
 ======================================================================
@@ -112,7 +115,9 @@ to Coach Andy first.
   in the weekly summary.
 - Chat: unlimited in the free version; any running topic.
 - Stats: read-only for runners; only Coach Andy can override.
-- Extra context: optional Strava notes, never required.
+- Data: runners send .fit files / Garmin .zip and type gym sessions.
+  No Strava. No Hevy in the free version.
+- Extra context: optional caption on the file, never required.
 - Taper: always suggested when a race is planned.
 - Flags: amber to runner only; red to Coach Andy.
 - Progress colours: green / yellow / grey (never red).
@@ -127,17 +132,24 @@ to Coach Andy first.
    register runner -> create profile -> add route -> restart gateway ->
    add to allowed list -> restart. (Never allow before the route exists:
    unrouted chats reach the default profile.)
-3. Sarah sends the welcome with the Strava link.
-4. Strava connects -> import last 8 weeks of runs and Hevy sessions,
-   read HR zones from Strava.
+3. Sarah sends the welcome asking for 6-8 weeks of history.
+4. Runner sends .fit files or a Garmin .zip -> history imported, max HR
+   taken from the files (built).
 5. Two questions only: any races planned? any injuries or niggles?
-6. Sarah sends the baseline snapshot; Coach Andy gets a new-runner summary.
-7. Normal feedback starts.
+6. Sarah sends the baseline snapshot (built); Coach Andy gets a new-runner
+   summary.
+7. Normal feedback starts: the runner sends each run's file after training.
+
+How runners get a .fit file
+- Garmin: Garmin Connect website (works in a phone browser) -> activity ->
+  gear icon -> Export Original -> send the .zip to the bot.
+- Coros, Suunto, Polar: phone app -> activity -> share/export .fit -> Telegram.
 
 Injury at any time: health note, Coach Andy alerted, careful mode on
 (mileage warning at +5% instead of +10%, extra 10% taper reduction,
 easy-running tips), check-in after 7 days.
-
+Serious symptoms (chest pain, fainting, palpitations, dizziness, signs of
+under-eating): "please see a doctor" and Coach Andy alerted immediately.
 ======================================================================
 7. SARAH'S VOICE AND MESSAGES
 ======================================================================
@@ -151,12 +163,13 @@ WELCOME
 strength session I'll send you a short note on how it went, plus a weekly
 summary on Sunday evenings and a fitness check once a month. Coach Andy
 looks after your training plans; I'm here to keep an eye on things and
-help along the way. To get started, connect your Strava here: [link].
-I'll only use your training data for coaching, and you can ask me to
-delete it any time."
+help along the way. To get started, send me your last six to eight weeks
+of runs: the .fit files from your watch, or the .zip from Garmin Connect's
+"Export Original". I'll only use your training data for coaching, and you
+can ask me to delete it any time."
 
-AFTER STRAVA CONNECTS
-"Thanks, you're connected. I've had a look at your last eight weeks. Two
+AFTER THE HISTORY UPLOAD
+"Thanks, got them all. I've had a look at your last eight weeks. Two
 quick questions before I share what I found: do you have any races
 coming up?"  /  "And are you carrying any injuries or niggles at the
 moment?"
@@ -235,7 +248,7 @@ Signals:
   Weekly distance (4-week avg)     progress: rising | stagnant: flat 6+ weeks
   Longest run                      progress: growing| stagnant: same 6+ weeks
   Easy/hard balance                good: ~80/20     | stagnant: mostly zone 3
-  Hevy lifts                       progress: up     | stagnant: same 4+ sessions
+  Strength lifts                   progress: up     | stagnant: same 4+ sessions
 On stagnation Sarah names the likely reason; Coach Andy is told.
 
 LOAD AND INJURY FLAGS (weekly traffic light)
@@ -246,13 +259,17 @@ Signs:
 - easy running <70%
 - heart rate higher at the same pace for 1-2 weeks
 - fitness dipping while distance rises
-- repeated low energy / poor sleep notes; high effort on easy runs
-- any niggle; long run >~35% of the week; sudden stop after a hard week
+- repeated low energy / poor sleep in captions or chat
+- any niggle; a long run 10-15% longer than the longest in the last
+  4-6 weeks; sudden stop after a hard week
+- weekly increases need a minimum rise of 5 km; returning to a recent
+  normal week after a down week is never flagged
 Levels:
   Green - no signs - normal report only
   Amber - one or two signs - runner only, gently, in weekly summary
   Red   - several signs, or niggle on high load - Coach Andy immediately,
           runner gets a calm message
+  Amber three weeks in a row -> escalates to Coach Andy
 
 ======================================================================
 9. RACE TAPER (always suggested when a race is planned)
@@ -293,19 +310,15 @@ pace. The fitness is already built; now it's about arriving fresh."
   fitness-check workings, HR zones, plain-English glossary.
 - Disagreement: acknowledge, explain the numbers, offer to pass to Coach
   Andy; repeated pushback is flagged.
-- Runners CANNOT change stats. Sarah suggests a Strava note or passes it
-  to Coach Andy, who decides.
+- Runners CANNOT change stats. Sarah suggests a caption on the next file
+  or passes it to Coach Andy, who decides.
 
-OPTIONAL STRAVA NOTES (extra context, never homework)
-- Description: e.g. "weather: hot. energy: 2. sleep: poor."
-- Perceived exertion (1-10), workout type (race/long run/workout),
-  treadmill toggle, private notes.
-- Keywords: weather, energy, sleep, niggle, hr bad, treadmill.
-- niggle -> injury flow; hr bad -> flagged to Coach Andy (not excluded);
+OPTIONAL CAPTIONS (extra context, never homework)
+- Free text with the file, e.g. "hot, legs tired, slept badly".
+- Keywords: weather, energy, sleep, niggle, race, intervals, long, treadmill.
+- "race"/"intervals"/"long" set the run type; a niggle -> injury flow;
   hot -> no drift tip, less weight in fitness check.
-- Edits after a debrief trigger a re-read and possible follow-up.
 - Mentioned once at onboarding, then only when a run looked unusual.
-
 ======================================================================
 11. CHAT
 ======================================================================
@@ -322,55 +335,64 @@ Telegram command menu (planned, via BotFather /setcommands):
 (Waiting on a Hermes check of how slash commands and buttons work.)
 
 ======================================================================
-12. BUILD LIST (free version, not started)
+12. BUILD LIST (free version)
 ======================================================================
 
+ Built (21 Oct 2026)
+ - .fit / .zip upload with per-runner folder check, duplicates ignored
+ - History import and baseline snapshot
+ - Typed gym sessions
+ - Max HR from files (unless Coach Andy locks zones)
+ - Short-run rule (stored, no debrief under 3 km / 20 min)
+ - Caption as note; treadmill flag
+
+ To build
  1. onboard / offboard commands automating the safe order
- 2. Welcome sent by the onboard command
+ 2. Welcome sent by the onboard command; new-runner summary to Coach Andy
  3. Tools to save consent, races, injury answers, careful-mode flag
- 4. Strava connect -> 8-week backfill, HR zones, baseline,
-    new-runner summary to Coach Andy
- 5. Short-run rule (no debrief under 3 km / 20 min)
- 6. Read Strava description, perceived exertion, workout type,
-    treadmill flag, private notes
- 7. Reports saved with their basis; drill-down tools and glossary
- 8. 7-day injury check-in
- 9. Runner data commands: show my data, delete my data
-10. Progress status and stagnation detection
-11. Weekly load/injury traffic light (amber -> runner, red -> Coach Andy)
-12. Race storage, taper calculator, weekly taper tracking,
+ 4. Reports saved with their basis; drill-down tools and glossary
+ 5. 7-day injury check-in; health escalation for serious symptoms
+ 6. Runner data commands: show my data, delete my data
+ 7. Progress status and stagnation detection
+ 8. Weekly load/injury traffic light (amber -> runner, red -> Coach Andy,
+    amber 3 weeks -> Coach Andy) with the corrected thresholds
+ 9. Race storage, taper calculator, weekly taper tracking,
     race-week and post-race messages
-13. Text gauges in weekly and monthly reports
+10. Text gauges in weekly and monthly reports
+11. Outbox: every report recorded with a status so none is lost or doubled
+12. Nudge when no file arrives for several days
 
-Infrastructure still to do:
-- Install data service, MCP server and Hermes gateway as auto-start
-  Windows services (NSSM / Task Scheduler)
-- Task Scheduler jobs: weekly (Sunday evening), fitness (4-weekly),
-  quiet runners (daily), nightly runners.db backup
-- Copy Sarah's SOUL.md into every runner profile
-- First real run and Hevy test
-
+Infrastructure
+- Auto-start: data service, MCP server, Hermes gateway, tunnel
+- Scheduled jobs: weekly (Sunday evening), fitness (4-weekly), quiet
+  runners (daily), nightly runners.db backup (encrypted, off the PC)
+- Outside uptime monitor on https://coach.sizweumoya.com/health
+- Copy Sarah's SOUL.md into every runner profile (sync script)
 ======================================================================
 13. RISKS AND CONSTRAINTS
 ======================================================================
 
-- Strava Standard tier: max 10 athletes, Strava subscription required.
-  Apply for Extended Access before growing past the beta.
-- Read the Strava API Agreement and Policy (AI use, storage, deletion).
-- The PC must stay on; if it is off, debriefs stop and Strava events
-  during the outage are missed (the backfill will cover gaps).
+- Friction: runners must send a file after each run. Garmin needs the
+  Connect website for "Export Original". Watch for drop-off; nudge kindly.
+- Later option: Garmin Connect Developer Program for automatic sync, only
+  if Garmin's terms allow AI processing for coaching.
+- The PC must stay on; if it is off, files sent meanwhile wait in Telegram
+  and are processed when the gateway is back.
 - Each new Hermes profile needs the model API key copied in.
 - .env must use LF line endings.
-- Health data: consent at onboarding, delete on request.
+- Health data (POPIA): explicit consent at onboarding, tell runners their
+  data goes to the AI model provider, age check (under-18s need a parent),
+  delete on request including Hermes memory, sessions and backups.
 - Load-test Hermes before scaling past ~10 runners.
-
+- Cost: quiet daily chat cap per runner and a spending alert.
 ======================================================================
 14. KEY REFERENCES
 ======================================================================
 
 - Repo: https://github.com/sizzleguyandy/sizweumoya
 - Build guide: docs/HERMES_BUILD.md
+- File uploads: docs/FIT_UPLOAD.md
 - Free version spec: docs/FREE_VERSION_SPEC.md
 - Persona: hermes/SOUL.md
 - Bot: @SizweUmoya_bot
-- Public endpoint: https://coach.sizweumoya.com (Strava only)
+- Public endpoint: https://coach.sizweumoya.com/health (health only)

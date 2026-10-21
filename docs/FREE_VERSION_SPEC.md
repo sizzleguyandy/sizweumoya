@@ -1,6 +1,7 @@
 # Free version spec: Sarah, Coach Andy's assistant
 
-Design decisions for the free version. **Status: designed, not built** unless marked.
+Design decisions for the free version. **Status: designed, not built** unless marked. File upload, history import, typed workouts,
+max HR from files and the short-run rule are **built** (merged 21 Oct 2026).
 The full project brief lives in the Claude doc "Runner Assistant Coach – System Brief".
 
 ## 1. Decisions
@@ -14,17 +15,18 @@ The full project brief lives in the Claude doc "Runner Assistant Coach – Syste
 | Short runs | Under 3 km **or** under 20 minutes: no debrief; stored and counted in the weekly summary |
 | Chat | Unlimited in the free version; any running topic |
 | Stats | Read-only for runners; only Coach Andy can override data |
-| Extra context | Optional Strava notes; never required |
+| Data source | Runners send `.fit` files (or a Garmin `.zip`) and type gym sessions to the bot. No Strava, no Hevy |
+| Extra context | Optional caption on the file; never required |
 
 ## 2. Onboarding
 
-Strava first, so Sarah only asks what the data cannot show.
+History first, so Sarah only asks what the data cannot show.
 
 1. **Access.** Runner messages the bot and gets the decline message. Coach Andy runs one
    `onboard` command: register → profile → route → restart → allowlist → restart.
-2. **Welcome** (sent automatically by the onboard command) with the Strava link.
-3. **Strava connects** → import last 8 weeks of runs and Hevy sessions, read HR zones from
-   Strava (`/athlete/zones`).
+2. **Welcome** (sent automatically by the onboard command) asking for their history.
+3. **History upload** → the runner sends their last 6–8 weeks of `.fit` files or a Garmin `.zip`;
+   runs and watch strength sessions are imported, max HR is taken from the files. **(Built.)**
 4. **Two questions:** any races planned (name, date, distance)? Any injuries or niggles?
 5. **Baseline snapshot** to the runner; **new-runner summary** to Coach Andy.
 6. Normal feedback starts.
@@ -38,10 +40,11 @@ warning at +5% instead of +10%, easy-running tips), check-in after 7 days.
 > Hi Tom, welcome! I'm Sarah, Coach Andy's assistant. After each run and strength session I'll
 > send you a short note on how it went, plus a weekly summary on Sunday evenings and a fitness
 > check once a month. Coach Andy looks after your training plans; I'm here to keep an eye on
-> things and help along the way. To get started, connect your Strava here: [link]. I'll only use
+> things and help along the way. To get started, send me your last six to eight weeks of runs:
+> the .fit files from your watch, or the .zip from Garmin Connect's "Export Original". I'll only use
 > your training data for coaching, and you can ask me to delete it any time.
 
-**After Strava connects**
+**After the history upload**
 > Thanks, you're connected. I've had a look at your last eight weeks. Two quick questions before
 > I share what I found: do you have any races coming up?
 
@@ -109,33 +112,30 @@ Seven days later: "Hi Tom, just checking in. How's the calf feeling this week?"
   workings, the runner's HR zones, a plain-English glossary.
 - Disagreement: acknowledge, explain the numbers, offer to pass it to Coach Andy. Repeated
   pushback is flagged to Coach Andy.
-- **Runners cannot change stats.** Sarah suggests a Strava note or passes it to Coach Andy.
+- **Runners cannot change stats.** Sarah suggests a caption on the next file or passes it to Coach Andy.
 
-## 5. Optional Strava notes
+## 5. Optional notes (file captions)
 
-| Strava field | Use |
-| --- | --- |
-| Description | Free text, e.g. "weather: hot. energy: 2. sleep: poor." |
-| Perceived exertion (1–10) | Felt effort vs heart rate |
-| Workout type (race / long run / workout) | Correct debrief without guessing |
-| Treadmill / indoor toggle | Pace left out of fitness comparisons |
-| Private notes | Read by Sarah, not public; useful for niggles |
+Runners can add a caption when they send a file. It is optional, mentioned once at onboarding
+and occasionally when a run looks unusual.
 
-Keywords: `weather`, `energy`, `sleep`, `niggle`, `hr bad`, `treadmill`.
-- `niggle` → injury flow. `hr bad` → run flagged to Coach Andy (not excluded).
-- Hot weather → no drift tip; reduced weight in the fitness check.
-- Strava sends an update event when a runner edits an activity; Sarah re-reads it and may send a
-  short follow-up.
-- Mentioned once at onboarding; afterwards only when a run looked unusual.
+Keywords Sarah understands: weather (hot, cold, windy), energy, sleep, niggle, race,
+intervals, long, treadmill. A caption with "race" or "intervals" sets the run type; a niggle
+triggers the injury flow. The watch's treadmill flag keeps that run out of pace comparisons.
+
+## 5a. Health escalation (beyond niggles)
+
+Chest pain, fainting, palpitations, dizziness, or signs of under-eating or disordered eating:
+Sarah says kindly that this needs a doctor, not a coach, and alerts Coach Andy immediately.
 
 ## 6. Build list for this spec (not started)
 
 1. `onboard` / `offboard` commands automating the safe order
 2. Welcome sent by the onboard command
 3. Tools: record consent, save races and injury answers, careful-mode flag (fixed fields only)
-4. Strava connect → 8-week backfill, HR zones from Strava, baseline, new-runner summary to Coach Andy
+4. ~~History import, max HR from files, baseline~~ **(built)**; new-runner summary to Coach Andy
 5. Short-run rule (no debrief under 3 km or 20 min)
-6. Read Strava description, perceived exertion, workout type, trainer flag, private note
+6. ~~File caption as note, treadmill flag~~ **(built)**
 7. Reports saved with their basis; drill-down tools and glossary
 8. 7-day injury check-in
 9. Runner data commands: show my data, delete my data
@@ -161,7 +161,7 @@ Signals and stagnation rules:
 | Weekly distance (4-week average) | Gradually rising | Flat 6+ weeks |
 | Longest run | Growing towards race needs | Same 6+ weeks |
 | Easy/hard balance | Close to 80/20 | Mostly zone 3 |
-| Hevy lifts | Weight or reps up | Same weight 4+ sessions |
+| Strength lifts (watch file or typed) | Weight or reps up | Same weight 4+ sessions |
 
 On stagnation Sarah names the likely reason from the data and Coach Andy is told.
 
@@ -174,8 +174,12 @@ Signs:
 - Easy running below 70%
 - Heart rate higher at the same pace for 1–2 weeks
 - Fitness dipping while distance rises
-- Repeated low energy / poor sleep in Strava notes, or high perceived effort on easy runs
-- Any niggle (chat or Strava note); long run above ~35% of the week; sudden stop after a hard week
+- Repeated low energy / poor sleep in captions or chat
+- Any niggle (chat or caption); a long run more than 10–15% longer than the longest in the last
+  4–6 weeks; sudden stop after a hard week
+- Weekly increase rules need a minimum absolute rise of 5 km, and a return to a recent normal
+  week after a down week is never flagged
+- Amber three weeks in a row escalates to Coach Andy
 
 | Level | Trigger | Who hears |
 | --- | --- | --- |

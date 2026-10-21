@@ -1,5 +1,10 @@
 # Hermes Agent build instructions (Windows)
 
+> **Update 21 Oct 2026: Strava is no longer used.** Runners send `.fit` files to the bot instead
+> (see `docs/FIT_UPLOAD.md`). Skip every Strava step in this guide (Strava app, webhook,
+> `STRAVA_*` keys, `PUBLIC_BASE_URL`, connect links). The Cloudflare tunnel only exposes `/health`
+> and is optional. Add `HERMES_HOME` to `.env` instead.
+
 Precise, ordered steps to set up Hermes Agent and the data service for Runner Assistant Coach
 (free version) on **one Windows 10/11 PC**. Follow them top to bottom. Each step ends with a
 **Check**; do not continue until it passes.
