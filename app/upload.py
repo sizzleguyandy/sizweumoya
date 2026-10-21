@@ -99,7 +99,8 @@ def process_blob(conn, runner, name: str, data: bytes, note: str = "") -> dict:
         return {"file": name, "status": "stored", "kind": "run", "date": row["date"],
                 "distance_km": row["distance_km"], "duration_s": row["duration_s"],
                 "run_type": row["run_type"], "treadmill": bool(row["treadmill"]),
-                "short": ingest.is_short(row["distance_km"], row["duration_s"])}
+                "short": ingest.is_short(row["distance_km"], row["duration_s"]),
+                "plan": row["plan"], "replaced_sheet_row": row["replaced_sheet_row"]}
     if act.kind == "strength":
         res = ingest.store_strength_fit(conn, runner, act, key, note)
         return {"file": name, "status": "stored", "kind": "strength", "date": act.local_date,

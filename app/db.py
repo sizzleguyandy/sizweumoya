@@ -68,6 +68,9 @@ def _migrate(conn) -> None:
         conn.execute("PRAGMA foreign_keys = ON")
     if "zones_locked" not in _columns(conn, "runners"):
         conn.execute("ALTER TABLE runners ADD COLUMN zones_locked INTEGER NOT NULL DEFAULT 0")
+    for col, decl in (("easy_hr_cap", "INTEGER"), ("weight_kg", "REAL")):
+        if col not in _columns(conn, "runners"):
+            conn.execute(f"ALTER TABLE runners ADD COLUMN {col} {decl}")
     if "completed_strava_id" in _columns(conn, "planned_workouts"):
         conn.execute("ALTER TABLE planned_workouts RENAME COLUMN completed_strava_id TO completed_activity_key")
     conn.commit()

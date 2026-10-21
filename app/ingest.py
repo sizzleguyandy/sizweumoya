@@ -3,7 +3,7 @@ import hashlib
 import json
 import logging
 
-from . import stats, workout_text
+from . import plans, stats, workout_text
 from .fitfile import FitActivity
 
 log = logging.getLogger(__name__)
@@ -83,10 +83,30 @@ def store_run(conn, runner, act: FitActivity, key: str, note: str = "") -> dict:
     # Treadmill pace is not comparable to outdoor pace, so it never feeds the fitness check.
     row["is_easy_valid"] = int(bool(row["avg_hr"]) and not act.treadmill and stats.is_easy_valid(
         run_type, zone_s, row["elevation_m"], dist_km, temp))
+    replaced = _replace_sheet_row(conn, row)
     cols = ", ".join(row)
     conn.execute(f"INSERT INTO runs ({cols}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
     conn.commit()
+    row["replaced_sheet_row"] = replaced
+    row["plan"] = plans.match_run(conn, runner, row)
     return row
+
+
+def _replace_sheet_row(conn, row: dict) -> bool:
+    """A .fit file for a run already imported from a spreadsheet replaces the spreadsheet row.
+
+    Same date and distance within 10%: the file has the detail (zones, drift), so it wins.
+    The spreadsheet note is kept if the file has no caption.
+    """
+    for old in conn.execute("SELECT id, activity_key, distance_km, note FROM runs WHERE runner_id=?"
+                            " AND source='sheet' AND date=?", (row["runner_id"], row["date"])).fetchall():
+        if old["distance_km"] and abs(old["distance_km"] - row["distance_km"]) <= 0.1 * old["distance_km"]:
+            conn.execute("UPDATE planned_workouts SET status='planned', completed_activity_key=NULL"
+                         " WHERE completed_activity_key=?", (old["activity_key"],))
+            conn.execute("DELETE FROM runs WHERE id=?", (old["id"],))
+            row["note"] = row["note"] or old["note"]
+            return True
+    return False
 
 
 def _store_sets(conn, runner, sid: int, sets) -> None:

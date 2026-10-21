@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS runners (
     resting_hr        INTEGER,
     hr_zones          TEXT,                   -- JSON list of 4 upper bounds: Z1..Z4 (Z5 above)
     zones_locked      INTEGER NOT NULL DEFAULT 0, -- 1 = set by Coach Andy; never auto-updated
+    easy_hr_cap       INTEGER,                -- coach-set ceiling for easy and long runs
+    weight_kg         REAL,
     goal              TEXT,
     units             TEXT NOT NULL DEFAULT 'km',
     joined            TEXT NOT NULL DEFAULT (date('now')),
@@ -143,6 +145,16 @@ CREATE TABLE IF NOT EXISTS planned_workouts (
     target          TEXT,                     -- JSON
     completed_activity_key TEXT,
     status          TEXT NOT NULL DEFAULT 'planned'  -- planned/done/missed/changed
+);
+
+CREATE TABLE IF NOT EXISTS races (
+    id          INTEGER PRIMARY KEY,
+    runner_id   INTEGER NOT NULL REFERENCES runners(runner_id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    date        TEXT NOT NULL,
+    distance_km REAL,
+    ascent_m    REAL,
+    note        TEXT
 );
 
 CREATE TABLE IF NOT EXISTS approvals (

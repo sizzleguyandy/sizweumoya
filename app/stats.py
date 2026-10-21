@@ -65,6 +65,8 @@ def classify_run(name: str, workout_type: int | None, distance_km: float,
     lname = (name or "").lower()
     if workout_type == 1 or "race" in lname or "parkrun" in lname:
         return "race"
+    if "time trial" in lname or "benchmark" in lname:
+        return "benchmark"
     if workout_type == 3 or any(w in lname for w in ("interval", "tempo", "threshold", "fartlek", "reps")):
         return "workout"
     if workout_type == 2 or distance_km >= long_km:

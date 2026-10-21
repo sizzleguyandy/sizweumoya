@@ -15,7 +15,7 @@ from mcp.server.mcpserver import Context, MCPServer
 
 from datetime import date as _date
 
-from . import hermes, ingest, queries, upload
+from . import hermes, ingest, plans, queries, upload
 from .config import settings
 from .db import session
 from .identity import AccessDenied, hash_token, resolve_runner
@@ -118,7 +118,7 @@ def get_fitness_trend(ctx: Context) -> dict:
 
 @mcp.tool()
 def get_last_strength_session(ctx: Context) -> dict | None:
-    """Most recent Hevy session with all sets."""
+    """Most recent strength session with all sets."""
     with session() as conn:
         return queries.last_strength_session(conn, _rid(ctx))
 
@@ -177,9 +177,19 @@ def save_runner_summary(ctx: Context, summary: str) -> str:
 
 @mcp.tool()
 def get_current_plan(ctx: Context) -> dict:
-    """Coach-written workouts from 3 days ago to 14 days ahead (paid tiers)."""
+    """Coach-written workouts from 3 days ago to 14 days ahead (paid tiers). Each has a status
+    (planned/done/missed) and a target: km, kind (easy/long/workout/benchmark/race), HR range
+    for quality work, climb for long runs. Easy and long runs are capped at the runner's
+    easy_hr_cap (see get_my_profile)."""
     with session() as conn:
         return queries.current_plan(conn, _rid(ctx))
+
+
+@mcp.tool()
+def get_my_races(ctx: Context) -> list[dict]:
+    """Upcoming races: name, date, distance, climb, notes and days to go."""
+    with session() as conn:
+        return plans.races(conn, _rid(ctx))
 
 
 @mcp.tool()

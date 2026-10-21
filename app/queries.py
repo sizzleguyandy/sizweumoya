@@ -2,7 +2,9 @@
 import secrets
 from datetime import date, timedelta
 
-from . import stats
+import json
+
+from . import plans, stats
 from .db import rows
 
 NOTE_CATEGORIES = {"pattern", "preference", "health", "life", "motivation", "milestone"}
@@ -10,7 +12,7 @@ NOTE_CATEGORIES = {"pattern", "preference", "health", "life", "motivation", "mil
 
 def profile(conn, rid: int) -> dict:
     r = conn.execute(
-        "SELECT name, max_hr, resting_hr, hr_zones, goal, units, tier, joined FROM runners WHERE runner_id=?",
+        "SELECT name, max_hr, resting_hr, hr_zones, easy_hr_cap, weight_kg, goal, units, tier, joined FROM runners WHERE runner_id=?",
         (rid,),
     ).fetchone()
     return dict(r) if r else {}
@@ -18,13 +20,20 @@ def profile(conn, rid: int) -> dict:
 
 def recent_runs(conn, rid: int, n: int = 5) -> list[dict]:
     out = rows(conn.execute(
-        "SELECT date, name, note, treadmill, distance_km, duration_s, avg_pace_s_km, avg_hr, max_hr,"
-        " z1_s, z2_s, z3_s, z4_s, z5_s, hr_drift_pct, run_type FROM runs WHERE runner_id=? ORDER BY date DESC LIMIT ?",
+        "SELECT activity_key, source, date, name, note, treadmill, distance_km, duration_s, avg_pace_s_km,"
+        " avg_hr, max_hr, z1_s, z2_s, z3_s, z4_s, z5_s, elevation_m, hr_drift_pct, run_type FROM runs"
+        " WHERE runner_id=? ORDER BY date DESC LIMIT ?",
         (rid, max(1, min(n, 30))),
     ))
+    runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (rid,)).fetchone()
     for r in out:
         r["pace"] = stats.format_pace(r["avg_pace_s_km"])
         r["tips"] = stats.run_tips(r)
+        r["plan"] = plans.plan_for_run(conn, runner, r.pop("activity_key"), r)
+        cap = (r["plan"] or {}).get("hr_cap") or (
+            runner["easy_hr_cap"] if r["run_type"] in ("easy", "long") else None)
+        if cap and r["avg_hr"] and r["avg_hr"] > cap and r["run_type"] in ("easy", "long"):
+            r["tips"].append("over_hr_cap")
     return out
 
 
@@ -200,10 +209,13 @@ def save_summary(conn, rid: int, summary: str) -> None:
 
 def current_plan(conn, rid: int, days: int = 14) -> dict:
     today = date.today()
-    return {"workouts": rows(conn.execute(
+    out = rows(conn.execute(
         "SELECT w.date, w.description, w.target, w.status FROM planned_workouts w JOIN plans p ON p.id=w.plan_id"
         " WHERE w.runner_id=? AND p.active=1 AND w.date>=? AND w.date<=? ORDER BY w.date",
-        (rid, (today - timedelta(days=3)).isoformat(), (today + timedelta(days=days)).isoformat())))}
+        (rid, (today - timedelta(days=3)).isoformat(), (today + timedelta(days=days)).isoformat())))
+    for w in out:
+        w["target"] = json.loads(w["target"] or "{}")
+    return {"workouts": out}
 
 
 def create_approval(conn, rid: int, reason: str, proposal: str) -> str:

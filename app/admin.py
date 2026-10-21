@@ -5,11 +5,13 @@
   python -m app.admin set-hermes-key --runner 1 --key <API_SERVER_KEY of that profile>
   python -m app.admin coach-token
   python -m app.admin delete-runner --runner 1
+  python -m app.admin reset-runner --runner 1 --name Andy --tier full
+  python -m app.admin import-tracker --runner 1 --file tracker.xlsx [--replace]
 """
 import argparse
 import json
 
-from . import stats
+from . import stats, tracker_import
 from .config import settings
 from .db import connect, init_db
 from .identity import hash_token, new_token
@@ -45,6 +47,14 @@ def main() -> None:
     sub.add_parser("coach-token")
     d = sub.add_parser("delete-runner")
     d.add_argument("--runner", type=int, required=True)
+    r = sub.add_parser("reset-runner")
+    r.add_argument("--runner", type=int, required=True)
+    r.add_argument("--name")
+    r.add_argument("--tier")
+    t = sub.add_parser("import-tracker")
+    t.add_argument("--runner", type=int, required=True)
+    t.add_argument("--file", required=True)
+    t.add_argument("--replace", action="store_true", help="clear the runner's existing data first")
     args = p.parse_args()
 
     conn = connect()
@@ -84,6 +94,26 @@ def main() -> None:
         conn.execute("DELETE FROM runners WHERE runner_id=?", (args.runner,))
         conn.commit()
         print("Deleted runner and all their data. Also remove their Hermes profile and route.")
+
+    elif args.cmd == "reset-runner":
+        cleared = tracker_import.reset_runner(conn, args.runner)
+        if args.name:
+            conn.execute("UPDATE runners SET name=? WHERE runner_id=?", (args.name, args.runner))
+        if args.tier:
+            conn.execute("UPDATE runners SET tier=? WHERE runner_id=?", (args.tier, args.runner))
+        conn.commit()
+        print("Cleared:", cleared or "nothing")
+        print("Profile, route, token and API key are unchanged.")
+    elif args.cmd == "import-tracker":
+        runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (args.runner,)).fetchone()
+        if runner is None:
+            raise SystemExit("no such runner")
+        if tracker_import.has_data(conn, args.runner):
+            if not args.replace:
+                raise SystemExit("This runner already has data. Re-run with --replace to clear it first.")
+            tracker_import.reset_runner(conn, args.runner)
+            runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (args.runner,)).fetchone()
+        print(json.dumps(tracker_import.import_workbook(conn, runner, args.file), indent=2))
 
 
 if __name__ == "__main__":

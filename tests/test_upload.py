@@ -206,3 +206,75 @@ def test_migration_from_strava_schema(tmp_path):
     assert conn.execute("SELECT COUNT(*) FROM strength_sets").fetchone()[0] == 0
     init_db(conn)  # running again is harmless
     conn.close()
+
+
+
+def _tracker(path):
+    """A small workbook in the same layout as Coach Andy's race tracker."""
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ri = wb.active
+    ri.title = "Race Info"
+    for row in [("TEST HALF — 21.1 km", None), ("Date", "Sunday 15 November 2026"), ("Start time", "05:45"),
+                ("Distance", "21.1 km"), ("Total ascent", "445 m"), ("Weight", "97 kg"),
+                ("Easy HR guardrail", "Keep easy runs under HR 138."), ("HM effort", "HR 152 - 163"),
+                ("Hill reps", "HR 160 - 175 on the climb"), ("1  Recovery", "109 - 135"), ("2  Easy", "136 - 147"),
+                ("3  Aerobic", "148 - 156"), ("4  Threshold", "157 - 166"), ("5  Anaerobic", "167 - 184")]:
+        ri.append(row)
+    wp = wb.create_sheet("Weekly Plan")
+    wp.append(["Wk", "Week Start", "Week End", "Phase", "Runs", "Tue\nEasy (km)",
+               "Thu — Quality Session", "Thu\n(km)", "Fri\nEasy (km)", "Sun — Long Run", "Sun\n(km)",
+               "Sun climb\ntarget (m)", "Total\n(km)", "Tue Done", "Thu Done", "Fri Done", "Sun Done"])
+    wp.append([1, datetime(2026, 10, 12), datetime(2026, 10, 18), "Build", 4, 5, "5K TIME TRIAL — flat", 8, 5,
+               "Hilly. HR <138", 12, 150, 30, True, True, False, False])
+    wp.append([2, datetime(2026, 10, 19), datetime(2026, 10, 25), "Build", 4, 5,
+               "HILLY HM REPS — 2 x 2km @ HM effort", 7, 5, "Hilly. Last 20min @ HM effort", 16, 250, 33,
+               False, False, False, False])
+    rl = wb.create_sheet("Run Log")
+    rl.append(["Date", "Day", "Session", "Distance (km)", "Time (min)", "Pace", "Avg HR", "Elevation (m)", "Notes"])
+    rl.append([datetime(2026, 10, 13), "Tue", "Easy", 5.0, 35.0, None, 135, 40, None])
+    rl.append([datetime(2026, 10, 14), "Wed", "Sick", None, None, None, None, None, "cold"])
+    rl.append([datetime(2026, 10, 17), "Sat", "Easy", 4.26, 34.8, None, 130, 0, "treadmill"])
+    rl.append([datetime(2026, 10, 18), "Sun", "Long", 10.07, 68.6, None, 151, 155, "ran hot"])
+    st = wb.create_sheet("Strength")
+    st.append(["LIFT LOG"])
+    st.append(["Date", "Day", "Exercise", "Set", "Reps", "Weight (kg)"])
+    st.append([datetime(2026, 10, 15), "Thu", "Chest Press (Machine)", 1, 5, 35])
+    st.append([datetime(2026, 10, 15), "Thu", "Chest Press (Machine)", 2, 7, 35])
+    wb.save(path)
+
+
+def test_tracker_import_and_fit_replaces_sheet_row(env, tmp_path):
+    from app import plans, tracker_import
+    conn, runner, folder, _ = env
+    rid = runner["runner_id"]
+    queries.add_note(conn, rid, "pattern", "old test note")
+    assert tracker_import.has_data(conn, rid)
+    tracker_import.reset_runner(conn, rid)
+    assert not tracker_import.has_data(conn, rid)
+    path = tmp_path / "t.xlsx"
+    _tracker(path)
+    res = tracker_import.import_workbook(conn, runner, str(path), today=date(2026, 10, 21))
+    assert res["zones"] == [135, 147, 156, 166] and res["max_hr"] == 184 and res["easy_hr_cap"] == 138
+    assert res["runs"] == 3 and res["sick_days"] == 1 and res["strength_sessions"] == 1
+    r = conn.execute("SELECT zones_locked, weight_kg FROM runners").fetchone()
+    assert tuple(r) == (1, 97.0)
+    assert plans.races(conn, rid, date(2026, 10, 21))[0]["days_to_go"] == 25
+    status = dict(conn.execute("SELECT date, status FROM planned_workouts").fetchall())
+    # Thu ticked with no run -> done; Sat treadmill run counts for Friday; Sun matched.
+    assert status["2026-10-15"] == "done" and status["2026-10-16"] == "done" and status["2026-10-18"] == "done"
+    assert status["2026-10-22"] == "planned"
+    long_run = [x for x in queries.recent_runs(conn, rid, 5) if x["date"] == "2026-10-18"][0]
+    assert long_run["run_type"] == "long" and long_run["plan"]["over_hr_cap"] and "over_hr_cap" in long_run["tips"]
+    thu = conn.execute("SELECT target FROM planned_workouts WHERE date='2026-10-22'").fetchone()[0]
+    assert json.loads(thu)["hr_range"] == [152, 163]
+
+    # The .fit for the Sunday run replaces the spreadsheet row and keeps the plan link.
+    runner = conn.execute("SELECT * FROM runners").fetchone()
+    start = datetime(2026, 10, 18, 9, 11, tzinfo=UTC)
+    out = upload.process_path(conn, runner, _save(folder, "sun.fit",
+                              run_fit(start, seconds=4116, speed_mps=2.447, hr=151)))
+    act = out["activity"]
+    assert act["replaced_sheet_row"] and act["plan"]["planned_date"] == "2026-10-18"
+    rows_ = conn.execute("SELECT source, note FROM runs WHERE date='2026-10-18'").fetchall()
+    assert [tuple(x) for x in rows_] == [("fit", "ran hot")]
