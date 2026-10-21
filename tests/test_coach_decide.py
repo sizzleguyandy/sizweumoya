@@ -148,3 +148,37 @@ def test_only_the_coach_profile_may_decide(conn, coach_ctx, delivered, monkeypat
         mcp_server.coach_decide(intruder, aid, "approved")
     assert conn.execute("SELECT status FROM approvals WHERE id=?", (aid,)).fetchone()["status"] == "pending"
     assert delivered == []
+
+
+# ---- replies to alerts ------------------------------------------------------
+
+def test_coach_reply_to_the_only_open_alert(conn, coach_ctx, delivered):
+    rid, _, _ = add_runner(conn, "Andy", "12345", 184, None)
+    aid = queries.create_alert(conn, rid, "other", "Runner asks for a 5 km race time estimate")
+    out = mcp_server.coach_reply(coach_ctx, "About 26 minutes, depending on course and weather")
+    assert out == f"Sent to Andy (alert #{aid} closed)."
+    _wait_for(delivered)
+    runner, prompt, _ = delivered[0]
+    assert runner["runner_id"] == rid and "About 26 minutes" in prompt and "5 km" in prompt
+    assert conn.execute("SELECT handled FROM coach_alerts WHERE id=?", (aid,)).fetchone()[0] == 1
+
+
+def test_coach_reply_asks_which_when_several_are_open(conn, coach_ctx, delivered):
+    a, _, _ = add_runner(conn, "Andy", "1", 184, None)
+    b, _, _ = add_runner(conn, "Tom", "2", 190, None)
+    queries.create_alert(conn, a, "other", "5k estimate")
+    tid = queries.create_alert(conn, b, "injury", "sore calf")
+    assert mcp_server.coach_reply(coach_ctx, "rest two days").startswith("More than one alert is open")
+    assert delivered == []
+    assert mcp_server.coach_reply(coach_ctx, "rest two days", tid) == f"Sent to Tom (alert #{tid} closed)."
+    _wait_for(delivered)
+    assert delivered[0][0]["runner_id"] == b
+
+
+def test_only_the_coach_may_reply(conn, coach_ctx, delivered):
+    rid, _, _ = add_runner(conn, "Andy", "1", 184, None)
+    queries.create_alert(conn, rid, "other", "x")
+    intruder = SimpleNamespace(headers={"x-hermes-profile": "runner-1", "Authorization": "Bearer nope-000"})
+    with pytest.raises(PermissionError):
+        mcp_server.coach_reply(intruder, "hello")
+    assert delivered == []

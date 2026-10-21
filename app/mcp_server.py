@@ -217,8 +217,9 @@ def alert_coach(ctx: Context, type: str, message: str) -> str:
     """Flag something to the head coach. type: injury, volume_jump, quiet_runner, other."""
     with session() as conn:
         r = _runner(ctx)
-        queries.create_alert(conn, r["runner_id"], type, message)
-    hermes.notify_coach(f"Alert ({type}) for {r['name']}: {message}")
+        aid = queries.create_alert(conn, r["runner_id"], type, message)
+    hermes.notify_coach(f"Alert #{aid} ({type}) for {r['name']}: {message}\n"
+                        "Reply here and I'll pass your answer on.")
     return "Coach alerted."
 
 
@@ -242,6 +243,21 @@ def coach_pending_approvals(ctx: Context) -> list[dict]:
         return [dict(r) for r in conn.execute(
             "SELECT a.id, r.name, a.created, a.reason, a.proposal FROM approvals a"
             " JOIN runners r ON r.runner_id=a.runner_id WHERE a.status='pending' ORDER BY a.created")]
+
+
+def _deliver_in_background(runner: dict, prompt: str, label: str) -> None:
+    """Start a turn in the runner's profile on a background thread and deliver the reply.
+
+    A turn costs a model round trip, so the coach's request must not wait on it.
+    A delivery error is logged, never raised into the coach's tool call.
+    """
+    def _work() -> None:
+        try:
+            hermes.run_and_deliver(runner, prompt)
+        except Exception:
+            log.exception("%s for runner %s could not be delivered", label, runner.get("runner_id"))
+
+    threading.Thread(target=_work, name=f"{label}-{runner.get('runner_id')}", daemon=True).start()
 
 
 def _deliver_decision(runner: dict, decision: str, proposal: str, note: str) -> None:
@@ -287,6 +303,46 @@ def coach_decide(ctx: Context, approval_id: str, decision: str, note: str = "") 
     _deliver_decision(runner, decision, proposal, note)
     return f"Recorded: {decision}. Runner notified."
 
+
+
+@mcp.tool()
+def coach_reply(ctx: Context, message: str, alert_id: int = 0) -> str:
+    """Coach only: answer an alert. Sarah passes Coach Andy's answer to that runner and the
+    alert is marked handled. Leave alert_id at 0 only when exactly one alert is open;
+    otherwise the open alerts are listed so you can ask which one is meant."""
+    _require_coach(ctx)
+    message = (message or "").strip()
+    if not message:
+        return "The reply is empty."
+    with session() as conn:
+        if alert_id:
+            row = conn.execute("SELECT * FROM coach_alerts WHERE id=?", (alert_id,)).fetchone()
+            if row is None:
+                return f"No alert #{alert_id}."
+        else:
+            open_ = conn.execute("SELECT a.id, r.name, a.message FROM coach_alerts a JOIN runners r"
+                                 " ON r.runner_id=a.runner_id WHERE a.handled=0 ORDER BY a.date DESC").fetchall()
+            if len(open_) != 1:
+                if not open_:
+                    return "There are no open alerts to reply to."
+                listing = "; ".join(f"#{a['id']} {a['name']}: {a['message'][:80]}" for a in open_)
+                return f"More than one alert is open, which one is this for? {listing}"
+            row = conn.execute("SELECT * FROM coach_alerts WHERE id=?", (open_[0]["id"],)).fetchone()
+        runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (row["runner_id"],)).fetchone()
+        if runner is None:
+            return "That runner no longer exists."
+        runner = dict(runner)
+        conn.execute("UPDATE coach_alerts SET handled=1 WHERE id=?", (row["id"],))
+        conn.commit()
+        queries.log_message(conn, runner["runner_id"], "out", "coach_reply", message[:2000])
+        about = row["message"]
+    prompt = (
+        f"Coach Andy has answered something you raised ({about}). Coach Andy's answer: \"{message}\". "
+        "Pass it on to the runner now, briefly and in your own voice, making clear it comes from "
+        "Coach Andy. Keep every number and condition exactly as given; add nothing of your own."
+    )
+    _deliver_in_background(runner, prompt, "coach-reply")
+    return f"Sent to {runner['name']} (alert #{row['id']} closed)."
 
 
 @mcp.tool()

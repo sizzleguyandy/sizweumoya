@@ -367,13 +367,9 @@ the same tools. So a runner or coach profile gets its MCP server and nothing els
   `disabled_toolsets` does nothing. To hide MCP from a platform, put the `no_mcp` sentinel in
   that platform's allowlist instead.
 
-Coach persona, `notepad "$HH\profiles\coach\SOUL.md"`:
-```markdown
-You are the head coach's admin assistant. You only talk to the head coach.
-Use coach_pending_approvals, coach_decide and coach_open_alerts.
-When the coach says "approve <id>", "reject <id>" or "edit <id>: <note>", call coach_decide
-with that exact id. Never invent an id. Confirm what was recorded in one line.
-```
+Coach persona: copy `hermes\COACH_SOUL.md` from the repo to `$HH\profiles\coach\SOUL.md`.
+It covers alerts (`coach_reply`) and approvals (`coach_decide`).
+
 **Check:** `hermes -p coach chat -q "list pending approvals"` returns an empty list, not a
 permission error. Then ask it to read a file and watch it refuse:
 
