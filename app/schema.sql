@@ -8,13 +8,10 @@ CREATE TABLE IF NOT EXISTS runners (
     mcp_token_hash    TEXT NOT NULL,          -- sha256 of this profile's MCP secret
     hermes_api_key    TEXT,                   -- this profile's API_SERVER_KEY
     tier              TEXT NOT NULL DEFAULT 'free',
-    strava_athlete_id INTEGER UNIQUE,
-    strava_access_token  TEXT,
-    strava_refresh_token TEXT,
-    strava_expires_at    INTEGER,
     max_hr            INTEGER,
     resting_hr        INTEGER,
     hr_zones          TEXT,                   -- JSON list of 4 upper bounds: Z1..Z4 (Z5 above)
+    zones_locked      INTEGER NOT NULL DEFAULT 0, -- 1 = set by Coach Andy; never auto-updated
     goal              TEXT,
     units             TEXT NOT NULL DEFAULT 'km',
     joined            TEXT NOT NULL DEFAULT (date('now')),
@@ -24,9 +21,12 @@ CREATE TABLE IF NOT EXISTS runners (
 CREATE TABLE IF NOT EXISTS runs (
     id              INTEGER PRIMARY KEY,
     runner_id       INTEGER NOT NULL REFERENCES runners(runner_id) ON DELETE CASCADE,
-    strava_id       INTEGER NOT NULL UNIQUE,
+    activity_key    TEXT NOT NULL UNIQUE,     -- 'fit:<sha256>' for uploaded files
+    source          TEXT NOT NULL DEFAULT 'fit',
     date            TEXT NOT NULL,
     name            TEXT,
+    note            TEXT,                     -- runner's caption
+    treadmill       INTEGER NOT NULL DEFAULT 0,
     distance_km     REAL,
     duration_s      INTEGER,
     avg_pace_s_km   REAL,
@@ -43,9 +43,11 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE TABLE IF NOT EXISTS strength_sessions (
     id              INTEGER PRIMARY KEY,
     runner_id       INTEGER NOT NULL REFERENCES runners(runner_id) ON DELETE CASCADE,
-    strava_id       INTEGER NOT NULL UNIQUE,
+    activity_key    TEXT NOT NULL UNIQUE,     -- 'fit:<sha256>' or 'text:<sha256>'
+    source          TEXT NOT NULL DEFAULT 'fit', -- fit / text
     date            TEXT NOT NULL,
     title           TEXT,
+    note            TEXT,
     duration_s      INTEGER,
     avg_hr          REAL,
     raw_description TEXT,
@@ -139,7 +141,7 @@ CREATE TABLE IF NOT EXISTS planned_workouts (
     date            TEXT NOT NULL,
     description     TEXT NOT NULL,
     target          TEXT,                     -- JSON
-    completed_strava_id INTEGER,
+    completed_activity_key TEXT,
     status          TEXT NOT NULL DEFAULT 'planned'  -- planned/done/missed/changed
 );
 

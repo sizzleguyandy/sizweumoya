@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from app import hevy, queries, stats
+from app import queries, stats
 from app.admin import add_runner
 from app.db import connect, init_db
 from app.hermes import extract_text
@@ -15,39 +15,6 @@ def conn():
     init_db(c)
     yield c
     c.close()
-
-
-# ---- Hevy parser ------------------------------------------------------------
-
-def test_hevy_parses_weights_reps_durations():
-    text = """Squat (Barbell)
-Set 1: 60 kg x 8
-Set 2: 65 kg x 6 [Warm-up]
-
-Bench Press (Barbell)
-Set 1: 135 lbs x 5
-
-Plank
-Set 1: 0:45
-
-Pull Up (Assisted)
-Set 1: -20 kg x 8
-
-Logged with Hevy"""
-    sets, ok = hevy.parse_description(text)
-    assert ok
-    assert [(s.exercise, s.set_no) for s in sets][:2] == [("Squat (Barbell)", 1), ("Squat (Barbell)", 2)]
-    assert sets[1].weight_kg == 65 and sets[1].reps == 6
-    assert sets[2].weight_kg == pytest.approx(61.23, abs=0.01)
-    assert sets[3].duration_s == 45
-    assert sets[4].weight_kg == -20
-
-
-def test_hevy_bad_text_not_ok():
-    sets, ok = hevy.parse_description("Great session today!")
-    assert sets == [] and not ok
-    sets, ok = hevy.parse_description("Squat\nSet 1: something odd")
-    assert not ok
 
 
 # ---- Stats ------------------------------------------------------------------
@@ -106,8 +73,8 @@ def test_queries_are_scoped_to_runner(conn):
     rid_a, _, _ = add_runner(conn, "A", "111", 188, None)
     rid_b, _, _ = add_runner(conn, "B", "222", 190, None)
     today = date.today().isoformat()
-    conn.execute("INSERT INTO runs (runner_id, strava_id, date, distance_km, avg_pace_s_km, run_type)"
-                 " VALUES (?,?,?,?,?,?)", (rid_a, 1, today, 8.0, 340, "easy"))
+    conn.execute("INSERT INTO runs (runner_id, activity_key, date, distance_km, avg_pace_s_km, run_type)"
+                 " VALUES (?,?,?,?,?,?)", (rid_a, "fit:1", today, 8.0, 340, "easy"))
     note_id = queries.add_note(conn, rid_a, "health", "Tight left calf")
     assert len(queries.recent_runs(conn, rid_a)) == 1
     assert queries.recent_runs(conn, rid_b) == []
@@ -119,10 +86,10 @@ def test_week_summary_and_approval_flow(conn):
     rid, _, _ = add_runner(conn, "A", "111", 188, None)
     monday = queries.week_start(date.today())
     for i, km in enumerate([10, 12]):
-        conn.execute("INSERT INTO runs (runner_id, strava_id, date, distance_km, z2_s, z1_s, z3_s, z4_s, z5_s)"
-                     " VALUES (?,?,?,?,?,0,0,0,0)", (rid, 10 + i, (monday - timedelta(days=7)).isoformat(), km, 100))
-    conn.execute("INSERT INTO runs (runner_id, strava_id, date, distance_km, z2_s, z1_s, z3_s, z4_s, z5_s)"
-                 " VALUES (?,?,?,?,?,0,0,0,0)", (rid, 20, monday.isoformat(), 26, 100))
+        conn.execute("INSERT INTO runs (runner_id, activity_key, date, distance_km, z2_s, z1_s, z3_s, z4_s, z5_s)"
+                     " VALUES (?,?,?,?,?,0,0,0,0)", (rid, f"fit:{10 + i}", (monday - timedelta(days=7)).isoformat(), km, 100))
+    conn.execute("INSERT INTO runs (runner_id, activity_key, date, distance_km, z2_s, z1_s, z3_s, z4_s, z5_s)"
+                 " VALUES (?,?,?,?,?,0,0,0,0)", (rid, "fit:20", monday.isoformat(), 26, 100))
     w = queries.week_summary(conn, rid, monday)
     assert w["total_km"] == 26 and w["last_week_km"] == 22 and w["mileage_verdict"] == "big_jump"
     assert "volume_jump" in w["tips"]

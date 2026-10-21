@@ -13,7 +13,9 @@ import threading
 
 from mcp.server.mcpserver import Context, MCPServer
 
-from . import hermes, queries
+from datetime import date as _date
+
+from . import hermes, ingest, queries, upload
 from .config import settings
 from .db import session
 from .identity import AccessDenied, hash_token, resolve_runner
@@ -48,6 +50,49 @@ def get_my_profile(ctx: Context) -> dict:
     """Runner profile: name, HR zones, goal, units, tier."""
     with session() as conn:
         return queries.profile(conn, _rid(ctx))
+
+
+@mcp.tool()
+def submit_activity_file(ctx: Context, file_path: str, note: str = "") -> dict:
+    """Store a .fit file (or Garmin .zip) the runner just sent. Pass the local path Hermes gave
+    you for the attachment, and the runner's message caption as `note` (e.g. "hot, legs tired").
+
+    Returns what was stored. For one run: date, distance, duration, run_type and `short`
+    (short runs get no debrief). For many files (history import): counts and date range;
+    then call get_baseline. Duplicates are ignored, so re-sending is safe."""
+    try:
+        runner = _runner(ctx)
+    except AccessDenied as e:
+        raise PermissionError(f"access denied: {e}") from None
+    with session() as conn:
+        try:
+            return upload.process_path(conn, runner, file_path, note)
+        except upload.UploadRejected as e:
+            return {"error": str(e)}
+
+
+@mcp.tool()
+def log_workout(ctx: Context, text: str, date: str = "") -> dict:
+    """Store a strength workout the runner typed, one exercise per line, e.g.
+    "Squat 3x8 60kg; RDL 3x10 50kg; Plank 3x45s". `date` is YYYY-MM-DD (default today).
+    Returns how many sets were understood and any lines that weren't."""
+    when = date or _date.today().isoformat()
+    try:
+        _date.fromisoformat(when)
+    except ValueError:
+        return {"error": "date must be YYYY-MM-DD"}
+    with session() as conn:
+        runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (_rid(ctx),)).fetchone()
+        return ingest.store_strength_text(conn, runner, text, when)
+
+
+@mcp.tool()
+def get_baseline(ctx: Context) -> dict:
+    """Onboarding snapshot from the last 8 weeks of uploaded files: average km and runs per
+    week, longest run, easy %, easy pace and heart rate, max HR seen, strength sessions.
+    `enough_data` is false with fewer than 6 runs."""
+    with session() as conn:
+        return queries.baseline(conn, _rid(ctx))
 
 
 @mcp.tool()

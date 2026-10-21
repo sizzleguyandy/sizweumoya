@@ -18,8 +18,8 @@ def profile(conn, rid: int) -> dict:
 
 def recent_runs(conn, rid: int, n: int = 5) -> list[dict]:
     out = rows(conn.execute(
-        "SELECT date, name, distance_km, duration_s, avg_pace_s_km, avg_hr, z1_s, z2_s, z3_s, z4_s, z5_s,"
-        " hr_drift_pct, run_type FROM runs WHERE runner_id=? ORDER BY date DESC LIMIT ?",
+        "SELECT date, name, note, treadmill, distance_km, duration_s, avg_pace_s_km, avg_hr, max_hr,"
+        " z1_s, z2_s, z3_s, z4_s, z5_s, hr_drift_pct, run_type FROM runs WHERE runner_id=? ORDER BY date DESC LIMIT ?",
         (rid, max(1, min(n, 30))),
     ))
     for r in out:
@@ -90,6 +90,42 @@ def fitness_trend(conn, rid: int, today: date | None = None) -> dict:
         "verdict": res.verdict, "ref_hr": res.ref_hr, "pace": stats.format_pace(res.pace_s_km),
         "previous_pace": stats.format_pace(res.prev_pace_s_km), "change_pct": res.change_pct,
         "valid_runs_recent": len(recent), "valid_runs_previous": len(previous),
+    }
+
+
+def baseline(conn, rid: int, weeks: int = 8, today: date | None = None) -> dict:
+    """The onboarding snapshot: the last `weeks` weeks of uploaded runs and strength sessions."""
+    today = today or date.today()
+    since = (today - timedelta(weeks=weeks)).isoformat()
+    runs = rows(conn.execute(
+        "SELECT date, distance_km, duration_s, avg_pace_s_km, avg_hr, z1_s, z2_s, z3_s, z4_s, z5_s,"
+        " is_easy_valid FROM runs WHERE runner_id=? AND date>? ORDER BY date", (rid, since)))
+    strength = conn.execute(
+        "SELECT COUNT(*) FROM strength_sessions WHERE runner_id=? AND date>?", (rid, since)).fetchone()[0]
+    if not runs:
+        return {"weeks": weeks, "runs": 0, "strength_sessions": strength,
+                "enough_data": False}
+    first = date.fromisoformat(runs[0]["date"])
+    span_weeks = max(1.0, min(weeks, ((today - first).days + 1) / 7))
+    total_km = sum(r["distance_km"] or 0 for r in runs)
+    zone_tot = sum(sum(r[f"z{i}_s"] or 0 for i in range(1, 6)) for r in runs)
+    easy_s = sum((r["z1_s"] or 0) + (r["z2_s"] or 0) for r in runs)
+    easy = [r for r in runs if r["is_easy_valid"]]
+    max_hr = conn.execute("SELECT max_hr FROM runners WHERE runner_id=?", (rid,)).fetchone()[0]
+    return {
+        "weeks": weeks,
+        "weeks_with_data": round(span_weeks, 1),
+        "runs": len(runs),
+        "avg_km_per_week": round(total_km / span_weeks, 1),
+        "avg_runs_per_week": round(len(runs) / span_weeks, 1),
+        "longest_run_km": round(max(r["distance_km"] or 0 for r in runs), 1),
+        "easy_pct": round(100 * easy_s / zone_tot) if zone_tot else None,
+        "easy_pace": stats.format_pace(
+            sum(r["avg_pace_s_km"] for r in easy) / len(easy)) if easy else None,
+        "easy_hr": round(sum(r["avg_hr"] for r in easy) / len(easy)) if easy else None,
+        "max_hr_seen": max_hr,
+        "strength_sessions": strength,
+        "enough_data": len(runs) >= 6,
     }
 
 

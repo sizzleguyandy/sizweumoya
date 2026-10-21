@@ -1,13 +1,16 @@
-"""Turn a Strava activity into stored runs / strength sessions."""
+"""Store uploaded activities (runs and strength sessions) for one runner."""
+import hashlib
 import json
 import logging
 
-from . import hevy, stats, strava
+from . import stats, workout_text
+from .fitfile import FitActivity
 
 log = logging.getLogger(__name__)
 
-RUN_TYPES = {"Run", "TrailRun", "VirtualRun"}
-STRENGTH_TYPES = {"WeightTraining", "Workout", "Crossfit"}
+# Runs shorter than both of these get stored but no individual debrief.
+SHORT_RUN_KM = 3.0
+SHORT_RUN_S = 20 * 60
 
 
 def runner_zones(runner) -> list[float]:
@@ -16,75 +19,108 @@ def runner_zones(runner) -> list[float]:
     return stats.default_zones(runner["max_hr"] or 190)
 
 
-def store_run(conn, runner, act: dict, streams: dict) -> dict:
+def is_short(distance_km: float, duration_s: float) -> bool:
+    return distance_km < SHORT_RUN_KM and duration_s < SHORT_RUN_S
+
+
+def exists(conn, key: str) -> str | None:
+    """Return 'run' / 'strength' if this activity is already stored."""
+    if conn.execute("SELECT 1 FROM runs WHERE activity_key=?", (key,)).fetchone():
+        return "run"
+    if conn.execute("SELECT 1 FROM strength_sessions WHERE activity_key=?", (key,)).fetchone():
+        return "strength"
+    return None
+
+
+def update_max_hr(conn, runner, observed: float | None) -> bool:
+    """Raise the runner's max HR (and default zones) when a file shows a higher one.
+
+    Zones set by Coach Andy (zones_locked=1) are never changed. Returns True if updated.
+    """
+    if not observed or observed < 120 or observed > 225:
+        return False
+    current = runner["max_hr"] or 0
+    if observed <= current:
+        return False
+    locked = runner["zones_locked"] if "zones_locked" in runner.keys() else 0
+    if locked:
+        conn.execute("UPDATE runners SET max_hr=? WHERE runner_id=?", (int(observed), runner["runner_id"]))
+    else:
+        conn.execute("UPDATE runners SET max_hr=?, hr_zones=? WHERE runner_id=?",
+                     (int(observed), json.dumps(stats.default_zones(observed)), runner["runner_id"]))
+    conn.commit()
+    return True
+
+
+def store_run(conn, runner, act: FitActivity, key: str, note: str = "") -> dict:
     zones = runner_zones(runner)
-    t, hr, v = streams.get("time", []), streams.get("heartrate", []), streams.get("velocity_smooth", [])
+    t, hr, v = act.time_s, act.hr, act.speed
     zone_s = stats.time_in_zones(t, hr, zones) if hr else [0] * 5
-    dist_km = (act.get("distance") or 0) / 1000
-    moving = act.get("moving_time") or 0
-    run_type = stats.classify_run(act.get("name", ""), act.get("workout_type"), dist_km, zone_s)
+    dist_km = act.distance_m / 1000
+    moving = act.timer_s or act.elapsed_s
+    # The caption is the only "name" a file has; it lets "race"/"intervals"/"long" classify.
+    run_type = stats.classify_run(note or "", None, dist_km, zone_s)
+    temp = act.temp_c
     row = {
         "runner_id": runner["runner_id"],
-        "strava_id": act["id"],
-        "date": act["start_date_local"][:10],
-        "name": act.get("name"),
+        "activity_key": key,
+        "source": "fit",
+        "date": act.local_date,
+        "name": "Treadmill run" if act.treadmill else "Run",
+        "note": (note or "")[:500] or None,
+        "treadmill": int(act.treadmill),
         "distance_km": round(dist_km, 2),
-        "duration_s": moving,
+        "duration_s": int(moving),
         "avg_pace_s_km": round(moving / dist_km, 1) if dist_km else None,
-        "avg_hr": act.get("average_heartrate"),
-        "max_hr": act.get("max_heartrate"),
+        "avg_hr": act.avg_hr,
+        "max_hr": act.max_hr,
         **{f"z{i + 1}_s": zone_s[i] for i in range(5)},
-        "elevation_m": act.get("total_elevation_gain"),
-        "temp_c": act.get("average_temp"),
+        "elevation_m": act.ascent_m,
+        "temp_c": temp,
         "hr_drift_pct": stats.hr_drift_pct(t, hr, v) if hr and v else None,
         "run_type": run_type,
     }
-    row["is_easy_valid"] = int(bool(row["avg_hr"]) and stats.is_easy_valid(
-        run_type, zone_s, row["elevation_m"], dist_km, row["temp_c"]))
+    # Treadmill pace is not comparable to outdoor pace, so it never feeds the fitness check.
+    row["is_easy_valid"] = int(bool(row["avg_hr"]) and not act.treadmill and stats.is_easy_valid(
+        run_type, zone_s, row["elevation_m"], dist_km, temp))
     cols = ", ".join(row)
-    conn.execute(
-        f"INSERT INTO runs ({cols}) VALUES ({', '.join('?' * len(row))})"
-        f" ON CONFLICT(strava_id) DO UPDATE SET "
-        + ", ".join(f"{c}=excluded.{c}" for c in row if c != "strava_id"),
-        list(row.values()),
-    )
+    conn.execute(f"INSERT INTO runs ({cols}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
     conn.commit()
     return row
 
 
-def store_strength(conn, runner, act: dict) -> dict:
-    desc = act.get("description") or ""
-    sets, ok = hevy.parse_description(desc)
-    rid = runner["runner_id"]
-    conn.execute(
-        "INSERT INTO strength_sessions (runner_id, strava_id, date, title, duration_s, avg_hr,"
-        " raw_description, parse_ok) VALUES (?,?,?,?,?,?,?,?)"
-        " ON CONFLICT(strava_id) DO UPDATE SET title=excluded.title, raw_description=excluded.raw_description,"
-        " parse_ok=excluded.parse_ok, duration_s=excluded.duration_s, avg_hr=excluded.avg_hr",
-        (rid, act["id"], act["start_date_local"][:10], act.get("name"), act.get("moving_time"),
-         act.get("average_heartrate"), desc, int(ok)),
-    )
-    sid = conn.execute("SELECT id FROM strength_sessions WHERE strava_id=?", (act["id"],)).fetchone()["id"]
-    conn.execute("DELETE FROM strength_sets WHERE session_id=?", (sid,))
+def _store_sets(conn, runner, sid: int, sets) -> None:
     conn.executemany(
-        "INSERT INTO strength_sets (session_id, runner_id, exercise, set_no, reps, weight_kg, duration_s,"
-        " distance_m) VALUES (?,?,?,?,?,?,?,?)",
-        [(sid, rid, s.exercise, s.set_no, s.reps, s.weight_kg, s.duration_s, s.distance_m) for s in sets],
+        "INSERT INTO strength_sets (session_id, runner_id, exercise, set_no, reps, weight_kg, duration_s)"
+        " VALUES (?,?,?,?,?,?,?)",
+        [(sid, runner["runner_id"], s.exercise, s.set_no, s.reps, s.weight_kg, s.duration_s) for s in sets],
     )
+
+
+def store_strength_fit(conn, runner, act: FitActivity, key: str, note: str = "") -> dict:
+    cur = conn.execute(
+        "INSERT INTO strength_sessions (runner_id, activity_key, source, date, title, note, duration_s,"
+        " avg_hr, parse_ok) VALUES (?,?,?,?,?,?,?,?,?)",
+        (runner["runner_id"], key, "fit", act.local_date, "Strength session", (note or "")[:500] or None,
+         int(act.timer_s or act.elapsed_s), act.avg_hr, int(bool(act.sets))),
+    )
+    _store_sets(conn, runner, cur.lastrowid, act.sets)
     conn.commit()
-    if desc and not ok:
-        log.warning("Hevy parse incomplete for activity %s (runner %s)", act["id"], rid)
-    return {"session_id": sid, "sets": len(sets), "parse_ok": ok}
+    return {"session_id": cur.lastrowid, "sets": len(act.sets)}
 
 
-def process_activity(conn, runner, activity_id: int) -> tuple[str, dict] | None:
-    """Fetch and store one activity. Returns (kind, stored_row) or None if ignored."""
-    token = strava.access_token(conn, runner["runner_id"])
-    act = strava.get_activity(token, activity_id)
-    sport = act.get("sport_type") or act.get("type")
-    if sport in RUN_TYPES:
-        streams = strava.get_streams(token, activity_id)
-        return "run", store_run(conn, runner, act, streams)
-    if sport in STRENGTH_TYPES:
-        return "strength", store_strength(conn, runner, act)
-    return None
+def store_strength_text(conn, runner, text: str, date: str) -> dict:
+    """A workout typed into the chat. Same text on the same day is stored once."""
+    key = "text:" + hashlib.sha256(f"{runner['runner_id']}|{date}|{text.strip()}".encode()).hexdigest()
+    if exists(conn, key):
+        return {"duplicate": True}
+    sets, unparsed = workout_text.parse(text)
+    cur = conn.execute(
+        "INSERT INTO strength_sessions (runner_id, activity_key, source, date, title, raw_description,"
+        " parse_ok) VALUES (?,?,?,?,?,?,?)",
+        (runner["runner_id"], key, "text", date, "Strength session", text[:2000],
+         int(bool(sets) and not unparsed)),
+    )
+    _store_sets(conn, runner, cur.lastrowid, sets)
+    conn.commit()
+    return {"duplicate": False, "session_id": cur.lastrowid, "sets": len(sets), "unparsed": unparsed}

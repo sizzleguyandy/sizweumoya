@@ -1,4 +1,6 @@
-"""HTTP service: Strava OAuth + webhook, and scheduled-job endpoints.
+"""HTTP service: health check and scheduled-job endpoints.
+
+Activities arrive as files the runner sends to the bot (see app/upload.py), not from here.
 
 Run:  uvicorn app.main:app --port 8000
 """
@@ -7,11 +9,9 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
-from . import hermes, ingest, queries, strava
-from .config import settings
+from . import hermes, queries
 from .db import connect, init_db, session
 
 logging.basicConfig(level=logging.INFO)
@@ -31,91 +31,6 @@ app = FastAPI(title="Runner Assistant Coach data service", lifespan=lifespan)
 @app.get("/health")
 def health():
     return {"ok": True}
-
-
-# ---- Strava OAuth ----------------------------------------------------------
-
-def _sign(runner_id: int) -> str:
-    key = (settings.strava_client_secret or "dev").encode()
-    return f"{runner_id}.{hmac.new(key, str(runner_id).encode(), 'sha256').hexdigest()[:24]}"
-
-
-def _verify_state(state: str) -> int:
-    rid, _, _ = state.partition(".")
-    if not rid.isdigit() or not hmac.compare_digest(_sign(int(rid)), state):
-        raise HTTPException(400, "bad state")
-    return int(rid)
-
-
-@app.get("/strava/connect/{runner_id}")
-def strava_connect(runner_id: int):
-    """Link sent to the runner during onboarding (state is signed so it can't be forged)."""
-    return {"url": strava.authorize_url(_sign(runner_id))}
-
-
-@app.get("/strava/callback", response_class=PlainTextResponse)
-def strava_callback(code: str, state: str, scope: str = ""):
-    rid = _verify_state(state)
-    if "activity:read" not in scope:
-        return "Please allow activity access so your coach can see your runs."
-    tok = strava.exchange_code(code)
-    with session() as conn:
-        strava.save_tokens(conn, rid, tok)
-        conn.execute("UPDATE runners SET strava_athlete_id=? WHERE runner_id=?", (tok["athlete"]["id"], rid))
-    return "Strava connected. You can close this page."
-
-
-# ---- Strava webhook --------------------------------------------------------
-
-@app.get("/strava/webhook")
-def strava_verify(mode: str = Query(alias="hub.mode"), token: str = Query(alias="hub.verify_token"),
-                  challenge: str = Query(alias="hub.challenge")):
-    if mode != "subscribe" or not hmac.compare_digest(token, settings.strava_verify_token):
-        raise HTTPException(403)
-    return {"hub.challenge": challenge}
-
-
-@app.post("/strava/webhook")
-async def strava_event(request: Request, tasks: BackgroundTasks):
-    ev = await request.json()
-    if ev.get("object_type") == "activity" and ev.get("aspect_type") in ("create", "update"):
-        tasks.add_task(handle_activity, ev["owner_id"], ev["object_id"], ev["aspect_type"])
-    elif ev.get("object_type") == "athlete" and (ev.get("updates") or {}).get("authorized") == "false":
-        tasks.add_task(handle_deauth, ev["owner_id"])
-    return {"ok": True}  # Strava needs a reply within 2 s
-
-
-def handle_activity(athlete_id: int, activity_id: int, aspect: str) -> None:
-    with session() as conn:
-        runner = conn.execute(
-            "SELECT * FROM runners WHERE strava_athlete_id=? AND active=1", (athlete_id,)).fetchone()
-        if runner is None:
-            return
-        try:
-            result = ingest.process_activity(conn, runner, activity_id)
-        except Exception:
-            log.exception("ingest failed for activity %s", activity_id)
-            return
-    if result is None or aspect != "create":
-        return  # updates refresh stored data quietly
-    kind, row = result
-    prompt = {
-        "run": "A new run just synced. Read the runner summary and notes, get the latest run, and send a short "
-               "run debrief with one tip at most (check recent tips first, then record the one you give).",
-        "strength": "A new strength session just synced. Get the last strength session and send a short debrief: "
-                    "main lifts, change vs last time, one tip at most.",
-    }[kind]
-    try:
-        hermes.run_and_deliver(runner, prompt)
-    except Exception:
-        log.exception("debrief delivery failed for runner %s", runner["runner_id"])
-
-
-def handle_deauth(athlete_id: int) -> None:
-    with session() as conn:
-        conn.execute(
-            "UPDATE runners SET strava_access_token=NULL, strava_refresh_token=NULL, strava_expires_at=NULL"
-            " WHERE strava_athlete_id=?", (athlete_id,))
 
 
 # ---- Scheduled jobs (call from cron with JOBS_TOKEN) -----------------------

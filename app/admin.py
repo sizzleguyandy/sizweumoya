@@ -71,7 +71,7 @@ def main() -> None:
          identity_header: {{name: {settings.mcp_profile_header}, value_from: profile}}""")
         print("4) Set that profile's API_SERVER_KEY, then: python -m app.admin set-hermes-key "
               f"--runner {rid} --key <key>")
-        print(f"5) Send the runner their Strava link: {settings.public_base_url}/strava/connect/{rid}")
+        print("5) Ask the runner to send their last 6-8 weeks of runs as .fit files (or a zip) to the bot.")
         print("\nThe MCP token is shown once. Only its hash is stored.")
     elif args.cmd == "set-hermes-key":
         conn.execute("UPDATE runners SET hermes_api_key=? WHERE runner_id=?", (args.key, args.runner))
