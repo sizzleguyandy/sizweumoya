@@ -15,7 +15,7 @@ from mcp.server.mcpserver import Context, MCPServer
 
 from datetime import date as _date
 
-from . import hermes, ingest, plans, queries, upload
+from . import hermes, ingest, plans, queries, strength, upload
 from .config import settings
 from .db import session
 from .identity import AccessDenied, hash_token, resolve_runner
@@ -128,6 +128,16 @@ def get_lift_history(ctx: Context, exercise: str) -> list[dict]:
     """Per-session top weight and reps for one exercise (partial name match)."""
     with session() as conn:
         return queries.lift_history(conn, _rid(ctx), exercise)
+
+
+@mcp.tool()
+def get_strength_review(ctx: Context) -> dict:
+    """Strength training against the evidence base (ACSM 2026): hard sets and training days per
+    muscle group over the last 7 days, and per lift the trend (load up / reps up / same / down)
+    with `stalled` after 4 identical sessions. Includes the guide values and what the data
+    cannot show (reps in reserve, rest, technique)."""
+    with session() as conn:
+        return strength.review(conn, _rid(ctx))
 
 
 @mcp.tool()

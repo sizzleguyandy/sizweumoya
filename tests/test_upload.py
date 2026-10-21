@@ -278,3 +278,22 @@ def test_tracker_import_and_fit_replaces_sheet_row(env, tmp_path):
     assert act["replaced_sheet_row"] and act["plan"]["planned_date"] == "2026-10-18"
     rows_ = conn.execute("SELECT source, note FROM runs WHERE date='2026-10-18'").fetchall()
     assert [tuple(x) for x in rows_] == [("fit", "ran hot")]
+
+
+def test_strength_review(env):
+    from app import strength
+    conn, runner, _, _ = env
+    rid = runner["runner_id"]
+    for i, d in enumerate(["2026-09-30", "2026-10-07", "2026-10-14", "2026-10-17", "2026-10-21"]):
+        ingest.store_strength_text(conn, runner, "Chest press 3x8 35kg\nLat pulldown 3x5 30kg"
+                                   + ("\nSquat 3x8 60kg" if i == 4 else ""), d)
+    ingest.store_strength_text(conn, runner, "Lat pulldown 3x7 30kg", "2026-10-20")
+    rev = strength.review(conn, rid, today=date(2026, 10, 21))
+    vol = rev["last_7_days"]["by_muscle"]
+    assert vol["chest"]["sets"] == 6 and vol["chest"]["days"] == 2 and vol["chest"]["volume"] == "below start range"
+    assert vol["back"]["sets"] == 9 and vol["quads"]["sets"] == 3
+    lifts = {x["exercise"]: x for x in rev["lifts"]}
+    assert lifts["chest press"]["stalled"] and lifts["chest press"]["same_sessions_in_a_row"] == 5
+    assert lifts["lat pulldown"]["trend"] == "reps down" and lifts["squat"]["trend"] == "first session"
+    assert strength.muscles_for("Preacher Curl (Machine)") == ["biceps"]
+    assert strength.muscles_for("Triceps Dip (Assisted)")[0] == "triceps"

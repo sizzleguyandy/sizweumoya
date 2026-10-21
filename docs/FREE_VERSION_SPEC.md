@@ -238,3 +238,19 @@ dashboard (paid version).
 11. Weekly load/injury traffic light with amber → runner, red → Coach Andy
 12. Race storage and taper calculator, weekly taper tracking, race-week and post-race messages
 13. Text gauges in weekly and monthly reports
+
+## 8. Strength evidence base (built)
+
+Strength feedback follows the ACSM 2026 resistance training position stand (supported by a 2025
+Sports Medicine systematic review). Tool: `get_strength_review` (`app/strength.py`).
+
+| Variable | Starting point | What the system checks |
+| --- | --- | --- |
+| Reps | 5–30 when sets are hard | Flags lifts done for more than 30 reps |
+| Proximity to failure | 1–3 reps in reserve | Not in the data; Sarah asks |
+| Weekly volume | 10–12 hard sets per muscle | Sets per muscle group, last 7 days |
+| Frequency | About twice a week per muscle | Training days per muscle group |
+| Progression | Reps up in range, then load | Trend per lift; `stalled` after 4 identical sessions |
+| Rest | 2–3 min compound, 1–2 min isolation | Not in the data; used in tips |
+| Deloading | Only when fatigue or performance call for it | No fixed deload week |
+| Exercise selection | Full, comfortable range of motion, loadable | Exercises mapped to muscle groups |
