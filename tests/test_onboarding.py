@@ -147,3 +147,33 @@ def test_other_runners_never_in_the_file(conn, tmp_path):
     f = sqlite3.connect(record.export_runner(conn, a, tmp_path / "a.db"))
     assert f.execute("SELECT COUNT(*) FROM runners").fetchone()[0] == 1
     assert f.execute("SELECT COUNT(*) FROM coach_notes").fetchone()[0] == 0
+
+
+def test_export_skips_tables_an_older_database_lacks(conn, tmp_path):
+    rid, _, _ = add_runner(conn, "Tom", "111", None, None)
+    conn.execute("DROP TABLE run_splits")  # as on a database from before splits existed
+    path = record.export_runner(conn, rid, tmp_path / "old.db")
+    f = sqlite3.connect(path)
+    assert f.execute("SELECT COUNT(*) FROM runners").fetchone()[0] == 1
+    assert f.execute("SELECT COUNT(*) FROM run_splits").fetchone()[0] == 0
+
+
+def test_schedule_export_returns_at_once_and_writes_the_file(tmp_path, monkeypatch):
+    import time
+    from types import SimpleNamespace
+    from app import db as app_db
+    dbp = tmp_path / "runners.db"
+    monkeypatch.setattr(app_db, "settings", SimpleNamespace(db_path=str(dbp)))
+    c = connect(str(dbp))
+    init_db(c)
+    rid, profile, _ = add_runner(c, "Tom", "111", None, None)
+    c.close()
+    t0 = time.perf_counter()
+    record.schedule_export(rid)
+    record.schedule_export(rid)  # folded into the running rebuild
+    assert time.perf_counter() - t0 < 0.05
+    target = record.path_for(profile)
+    deadline = time.time() + 5
+    while time.time() < deadline and (not target.exists() or record._running):
+        time.sleep(0.02)
+    assert target.exists() and not record._running

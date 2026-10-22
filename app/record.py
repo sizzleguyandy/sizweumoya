@@ -7,13 +7,17 @@ reports and messages, notes, races, plans, fitness checks, alerts and approvals.
 Secrets (MCP token hash, Hermes API key) are never copied into it.
 """
 import json
+import logging
 import os
 import sqlite3
+import threading
 from datetime import date, datetime
 from pathlib import Path
 
 from .config import settings
-from .db import SCHEMA, rows
+from .db import SCHEMA, rows, session
+
+log = logging.getLogger(__name__)
 
 # table -> how its rows belong to a runner (all carry runner_id).
 TABLES = ("runners", "runs", "run_splits", "strength_sessions", "strength_sets", "messages",
@@ -114,6 +118,8 @@ def export_runner(conn, rid: int, dest: Path | None = None) -> Path | None:
             src_cols = [c[1] for c in conn.execute(f"PRAGMA table_info({table})")]
             dst_cols = {c[1] for c in out.execute(f"PRAGMA table_info({table})")}
             cols = [c for c in src_cols if c in dst_cols and c not in SECRET_COLUMNS.get(table, ())]
+            if "runner_id" not in cols:  # table missing from an older database: nothing to copy
+                continue
             data = conn.execute(f"SELECT {', '.join(cols)} FROM {table} WHERE runner_id=?", (rid,)).fetchall()
             if data:
                 out.executemany(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
@@ -132,3 +138,36 @@ def delete_file(profile: str) -> None:
     p = path_for(profile)
     if p.exists():
         p.unlink()
+
+
+# ---- rebuilding in the background ------------------------------------------------
+# A rebuild copies every table, so tool calls never wait for it: they ask for one and return.
+# Requests for the same runner while a rebuild is running are folded into one more rebuild.
+
+_lock = threading.Lock()
+_running: set[int] = set()
+_again: set[int] = set()
+
+
+def schedule_export(rid: int) -> None:
+    with _lock:
+        if rid in _running:
+            _again.add(rid)
+            return
+        _running.add(rid)
+    threading.Thread(target=_export_loop, args=(rid,), name=f"record-{rid}", daemon=True).start()
+
+
+def _export_loop(rid: int) -> None:
+    while True:
+        try:
+            with session() as conn:
+                export_runner(conn, rid)
+        except Exception:
+            log.exception("record file for runner %s could not be rebuilt", rid)
+        with _lock:
+            if rid in _again:
+                _again.discard(rid)
+                continue
+            _running.discard(rid)
+            return

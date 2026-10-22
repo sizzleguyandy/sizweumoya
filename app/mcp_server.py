@@ -51,10 +51,7 @@ def _write(rid: int):
     with session() as conn:
         yield conn
         conn.commit()
-        try:
-            record.export_runner(conn, rid)
-        except Exception:
-            log.exception("record file for runner %s could not be rebuilt", rid)
+    record.schedule_export(rid)
 
 
 # ---- runner tools ----------------------------------------------------------
@@ -507,7 +504,7 @@ def coach_decide(ctx: Context, approval_id: str, decision: str, note: str = "") 
         proposal = row["proposal"]
         if decision == "approved":
             onboarding.apply_zones(conn, row)
-        record.export_runner(conn, runner["runner_id"])
+    record.schedule_export(runner["runner_id"])
     _deliver_decision(runner, decision, proposal, note)
     return f"Recorded: {decision}. Runner notified."
 
@@ -543,8 +540,8 @@ def coach_reply(ctx: Context, message: str, alert_id: int = 0) -> str:
         conn.execute("UPDATE coach_alerts SET handled=1 WHERE id=?", (row["id"],))
         conn.commit()
         queries.log_message(conn, runner["runner_id"], "out", "coach_reply", message[:2000])
-        record.export_runner(conn, runner["runner_id"])
         about = row["message"]
+    record.schedule_export(runner["runner_id"])
     prompt = (
         f"Coach Andy has answered something you raised ({about}). Coach Andy's answer: \"{message}\". "
         "Pass it on to the runner now, briefly and in your own voice, making clear it comes from "
@@ -565,4 +562,9 @@ def coach_open_alerts(ctx: Context) -> list[dict]:
 
 
 if __name__ == "__main__":
+    from .db import connect, init_db
+
+    _c = connect()
+    init_db(_c)  # brings an older runners.db up to the current schema before serving
+    _c.close()
     mcp.run("streamable-http", host="127.0.0.1", port=int(os.environ.get("MCP_PORT", "8100")))
