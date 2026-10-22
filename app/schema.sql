@@ -93,6 +93,8 @@ CREATE TABLE IF NOT EXISTS weekly_summary (
     strength_sessions   INTEGER,
     easy_pct            REAL,
     km_change_pct       REAL,
+    flag_level          TEXT,                 -- green / amber / red (load and injury)
+    flags               TEXT,                 -- JSON list of the signs
     PRIMARY KEY (runner_id, week_start)
 );
 

@@ -73,7 +73,8 @@ def _migrate(conn) -> None:
                              ("runners", "focus", "TEXT NOT NULL DEFAULT 'running'"), ("runners", "consent_at", "TEXT"),
                              ("runners", "onboarded_at", "TEXT"), ("messages", "basis", "TEXT"),
                              ("approvals", "kind", "TEXT NOT NULL DEFAULT 'plan'"),
-                             ("approvals", "payload", "TEXT")):
+                             ("approvals", "payload", "TEXT"),
+                             ("weekly_summary", "flag_level", "TEXT"), ("weekly_summary", "flags", "TEXT")):
         if col not in _columns(conn, table):
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
             if col == "onboarded_at":

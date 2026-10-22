@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 import json
 
-from . import paces, plans, stats
+from . import paces, plans, stats, trends
 from . import strength as strength_mod
 from .db import rows
 
@@ -104,12 +104,18 @@ def week_summary(conn, rid: int, start: date | None = None) -> dict:
         result["strength_review"] = strength_mod.review(conn, rid, end - timedelta(days=1))
     if m["strength"] == "guided":
         result["strength_vs_programme"] = plans.strength_vs_programme(conn, rid, start, end)
+    if m["focus"] in ("running", "hybrid"):
+        result["load"] = trends.load(conn, rid, start)
+        if m["running"] != "guided":  # a programme from Coach Andy has its own taper
+            result["taper"] = trends.taper(conn, rid)
     conn.execute(
-        "INSERT INTO weekly_summary (runner_id, week_start, total_km, runs, strength_sessions, easy_pct, km_change_pct)"
-        " VALUES (?,?,?,?,?,?,?) ON CONFLICT(runner_id, week_start) DO UPDATE SET total_km=excluded.total_km,"
-        " runs=excluded.runs, strength_sessions=excluded.strength_sessions, easy_pct=excluded.easy_pct,"
-        " km_change_pct=excluded.km_change_pct",
-        (rid, result["week_start"], result["total_km"], n, strength, result["easy_pct"], change),
+        "INSERT INTO weekly_summary (runner_id, week_start, total_km, runs, strength_sessions, easy_pct, km_change_pct,"
+        " flag_level, flags) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(runner_id, week_start) DO UPDATE SET"
+        " total_km=excluded.total_km, runs=excluded.runs, strength_sessions=excluded.strength_sessions,"
+        " easy_pct=excluded.easy_pct, km_change_pct=excluded.km_change_pct, flag_level=excluded.flag_level,"
+        " flags=excluded.flags",
+        (rid, result["week_start"], result["total_km"], n, strength, result["easy_pct"], change,
+         (result.get("load") or {}).get("level"), json.dumps((result.get("load") or {}).get("signs") or [])),
     )
     conn.commit()
     return result
@@ -158,10 +164,14 @@ def month_summary(conn, rid: int, year: int, month: int) -> dict:
         out["lifts"] = strength_mod.lift_progress(conn, rid, start.isoformat())
     if m["strength"] == "guided":
         out["strength_vs_programme"] = plans.strength_vs_programme(conn, rid, start, end)
+    if m["focus"] in ("running", "hybrid"):
+        out["progress"] = trends.progress(conn, rid, min(end - timedelta(days=1), date.today()))
+    if m["focus"] in ("strength", "hybrid"):
+        out["strength_records"] = trends.strength_records(conn, rid, since_days=(end - start).days)
     return out
 
 
-def fitness_trend(conn, rid: int, today: date | None = None) -> dict:
+def fitness_trend(conn, rid: int, today: date | None = None, save: bool = True) -> dict:
     today = today or date.today()
     w1, w2 = today - timedelta(days=28), today - timedelta(days=56)
     q = ("SELECT avg_pace_s_km, avg_hr FROM runs WHERE runner_id=? AND is_easy_valid=1"
@@ -169,12 +179,13 @@ def fitness_trend(conn, rid: int, today: date | None = None) -> dict:
     recent = rows(conn.execute(q, (rid, w1.isoformat(), today.isoformat())))
     previous = rows(conn.execute(q, (rid, w2.isoformat(), w1.isoformat())))
     res = stats.fitness_check(recent, previous)
-    conn.execute(
-        "INSERT INTO fitness_checks (runner_id, date, ref_hr, pace_s_km, prev_pace_s_km, change_pct, verdict)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (rid, today.isoformat(), res.ref_hr, res.pace_s_km, res.prev_pace_s_km, res.change_pct, res.verdict),
-    )
-    conn.commit()
+    if save:
+        conn.execute(
+            "INSERT INTO fitness_checks (runner_id, date, ref_hr, pace_s_km, prev_pace_s_km, change_pct, verdict)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (rid, today.isoformat(), res.ref_hr, res.pace_s_km, res.prev_pace_s_km, res.change_pct, res.verdict),
+        )
+        conn.commit()
     return {
         "verdict": res.verdict, "ref_hr": res.ref_hr, "pace": stats.format_pace(res.pace_s_km),
         "previous_pace": stats.format_pace(res.prev_pace_s_km), "change_pct": res.change_pct,

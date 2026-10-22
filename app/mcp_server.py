@@ -16,7 +16,7 @@ from mcp.server.mcpserver import Context, MCPServer
 
 from datetime import date as _date
 
-from . import hermes, ingest, onboarding, paces, plans, queries, record, strength, upload
+from . import hermes, ingest, onboarding, paces, plans, queries, record, strength, trends, upload
 from .config import settings
 from .db import session
 from .identity import AccessDenied, hash_token, resolve_runner
@@ -153,6 +153,27 @@ def get_month_summary(ctx: Context, month: str = "") -> dict:
         y, m = (first.year - 1, 12) if first.month == 1 else (first.year, first.month - 1)
     with session() as conn:
         return queries.month_summary(conn, _rid(ctx), y, m)
+
+
+@mcp.tool()
+def get_my_progress(ctx: Context) -> dict:
+    """The big picture, with or without a programme. running: progress status (green/yellow/grey,
+    never red) from four signals (easy pace at the same heart rate, weekly km, longest run, easy
+    share) plus stagnation flags; load: this week's load and injury traffic light with its signs;
+    taper: suggested taper if a race is within 4 weeks and there's no programme. strength:
+    records per lift (best weight, estimated 1RM, new_record) and the strength review."""
+    rid = _rid(ctx)
+    with session() as conn:
+        m = plans.mode(conn, rid)
+        out: dict = {"focus": m["focus"]}
+        if m["focus"] in ("running", "hybrid"):
+            out["running"] = trends.progress(conn, rid)
+            out["load"] = trends.load(conn, rid, queries.week_start(_date.today()))
+            if m["running"] != "guided":
+                out["taper"] = trends.taper(conn, rid)
+        if m["focus"] in ("strength", "hybrid"):
+            out["strength"] = {"records": trends.strength_records(conn, rid), "review": strength.review(conn, rid)}
+        return out
 
 
 @mcp.tool()

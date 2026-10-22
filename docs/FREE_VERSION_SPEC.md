@@ -273,3 +273,16 @@ Decided by what is on the runner's file, never asked. No programme on file means
 returns to option 1. A strength programme on file is reported (`strength_programme`) for the
 paid strength service; option 1 strength is the runner's own logged sessions.
 Job: `POST /jobs/session-preview` (daily, evening) previews tomorrow's session for guided runners.
+
+## 10. Trends and progression (built)
+
+For everyone, with or without a programme (`app/trends.py`, tool `get_my_progress`):
+
+| Feature | What it does |
+| --- | --- |
+| Run in context | Each stored run is compared with similar runs (same type, distance within 20%, outdoor, 8 weeks): pace and HR vs usual. Personal bests (longest run, fastest pace over 5/10/21.1/42.2 km+), run-count milestones |
+| Progress status | Green / yellow / grey (never red) from easy pace at the same HR, weekly km (4 vs 4 weeks), longest run, easy share |
+| Stagnation | Distance flat 6 weeks, longest run not growing 6 weeks, little easy running, fitness steady 3 months |
+| Load traffic light | Spec 7.2 rules incl. 5 km minimum rise, down-week returns ignored, careful mode (+5%) with an active health note. Amber -> runner only; red, or amber 3 weeks running -> Coach Andy automatically (`/jobs/weekly`) |
+| Taper | Spec 7.3 table from the last 3 full weeks, when a race is within 4 weeks and no programme is on file |
+| Strength records | Best weight and estimated 1RM per lift, with new records flagged |

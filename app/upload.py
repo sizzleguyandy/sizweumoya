@@ -17,7 +17,7 @@ import os
 import zipfile
 from pathlib import Path
 
-from . import ingest
+from . import ingest, trends
 from .config import settings
 from .fitfile import FitError, parse
 
@@ -100,7 +100,10 @@ def process_blob(conn, runner, name: str, data: bytes, note: str = "") -> dict:
                 "distance_km": row["distance_km"], "duration_s": row["duration_s"],
                 "run_type": row["run_type"], "treadmill": bool(row["treadmill"]),
                 "short": ingest.is_short(row["distance_km"], row["duration_s"]),
-                "plan": row["plan"], "replaced_sheet_row": row["replaced_sheet_row"]}
+                "plan": row["plan"], "replaced_sheet_row": row["replaced_sheet_row"],
+                "context": trends.run_context(conn, runner["runner_id"], row["date"], row["distance_km"],
+                                              row["avg_pace_s_km"], row["avg_hr"], row["run_type"],
+                                              bool(row["treadmill"]))}
     if act.kind == "strength":
         res = ingest.store_strength_fit(conn, runner, act, key, note)
         return {"file": name, "status": "stored", "kind": "strength", "date": act.local_date,
