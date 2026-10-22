@@ -8,6 +8,7 @@
   python -m app.admin reset-runner --runner 1 --name Andy --tier full
   python -m app.admin set-zones --runner 1 --zones 132,144,152,162 [--max-hr 184] [--easy-cap 138]
   python -m app.admin onboard --name Tom --chat-id 123456789 [--focus running|strength|hybrid]
+  python -m app.admin set-focus --runner 2 --focus hybrid
   python -m app.admin welcome --runner 2
   python -m app.admin load-programme --runner 2 --file programme.csv [--replace]
   python -m app.admin export-record --runner 2 [--to path.db]
@@ -17,7 +18,7 @@
 import argparse
 import json
 
-from . import hermes, programme, record, stats, tracker_import
+from . import hermes, onboarding, programme, record, stats, tracker_import
 from .config import settings
 from .db import connect, init_db
 from .identity import hash_token, new_token
@@ -49,6 +50,9 @@ def main() -> None:
         a.add_argument("--max-hr", type=int)
         a.add_argument("--goal")
         a.add_argument("--focus", choices=["running", "strength", "hybrid"])
+    fo = sub.add_parser("set-focus")
+    fo.add_argument("--runner", type=int, required=True)
+    fo.add_argument("--focus", required=True, choices=["running", "strength", "hybrid"])
     w = sub.add_parser("welcome", help="Sarah sends the welcome and starts onboarding")
     w.add_argument("--runner", type=int, required=True)
     lp = sub.add_parser("load-programme", help="load a run and/or strength programme from a CSV")
@@ -160,6 +164,10 @@ def main() -> None:
             runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (args.runner,)).fetchone()
         print(json.dumps(tracker_import.import_workbook(conn, runner, args.file), indent=2))
 
+    elif args.cmd == "set-focus":
+        onboarding.set_focus(conn, args.runner, args.focus)
+        record.export_runner(conn, args.runner)
+        print(f"Runner {args.runner} focus: {args.focus}")
     elif args.cmd == "welcome":
         runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (args.runner,)).fetchone()
         if runner is None or not runner["hermes_api_key"]:
