@@ -148,3 +148,34 @@ def tomorrow_session(conn, rid: int, today: date | None = None) -> list:
     s = sessions_around(conn, rid, today)
     tomorrow = (today + timedelta(days=1)).isoformat()
     return [w for w in s.get("next", []) if w["date"] == tomorrow]
+
+
+def week_vs_programme(conn, rid: int, start: date, end: date, actual: dict) -> dict:
+    """Guided mode: this week's programme against what was done."""
+    ws = conn.execute(
+        "SELECT w.* FROM planned_workouts w JOIN plans p ON p.id=w.plan_id WHERE w.runner_id=?"
+        " AND p.active=1 AND p.type='run' AND w.date>=? AND w.date<? ORDER BY w.date",
+        (rid, start.isoformat(), end.isoformat())).fetchall()
+    if not ws:
+        return {"sessions_planned": 0}
+    targets = [(w, _target(w)) for w in ws]
+    planned_km = round(sum(t.get("km") or 0 for _, t in targets), 1)
+    long_ = [(w, t) for w, t in targets if t.get("kind") in ("long", "race")]
+    out = {
+        "week": targets[0][1].get("week"), "phase": targets[0][1].get("phase"),
+        "planned_km": planned_km, "actual_km": actual["total_km"],
+        "km_pct_of_plan": round(100 * actual["total_km"] / planned_km) if planned_km else None,
+        "sessions_planned": len(ws),
+        "done": sum(1 for w in ws if w["status"] == "done"),
+        "missed": [f"{w['date']} {w['description'][:40]}" for w in ws if w["status"] == "missed"],
+        "still_to_come": [f"{w['date']} {w['description'][:40]}" for w in ws if w["status"] == "planned"],
+    }
+    if long_:
+        w, t = long_[-1]
+        got = conn.execute("SELECT distance_km, avg_hr, elevation_m FROM runs WHERE activity_key=?",
+                           (w["completed_activity_key"],)).fetchone() if w["completed_activity_key"] else None
+        out["long_run"] = {"planned_km": t.get("km"), "planned_climb_m": t.get("climb_m"),
+                           "actual_km": got["distance_km"] if got else None,
+                           "actual_climb_m": got["elevation_m"] if got else None,
+                           "avg_hr": got["avg_hr"] if got else None}
+    return out

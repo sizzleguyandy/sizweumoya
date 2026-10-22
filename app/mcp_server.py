@@ -115,7 +115,9 @@ def get_recent_runs(ctx: Context, n: int = 5) -> list[dict]:
 
 @mcp.tool()
 def get_week_summary(ctx: Context) -> dict:
-    """This week's km, runs, strength sessions, easy %, and mileage change vs last week."""
+    """This week's km, time, runs, strength sessions, easy %, mileage change vs last week,
+    time in each named HR zone, longest run and easy runs over the HR cap. In guided mode also
+    `vs_programme`: planned vs actual km, sessions done/missed/to come, long run vs target."""
     with session() as conn:
         return queries.week_summary(conn, _rid(ctx))
 

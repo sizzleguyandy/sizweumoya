@@ -263,6 +263,7 @@ Decided by what is on the runner's file, never asked. No programme on file means
 | --- | --- | --- |
 | When | No active run programme | Coach Andy's run programme on file and not yet ended |
 | Feedback, flags, taper suggestion, chat | Yes | Yes |
+| Weekly report: distance, time, time in each HR zone | Yes | Yes, plus planned vs actual km, sessions done/missed, long run vs target |
 | Strength the runner logs themselves | Tracked | Tracked |
 | Talks the runner through the programme | No | Yes: `get_my_sessions`, evening preview, every run compared with its session |
 | Writes or changes a plan | Never | Never (changes go to Coach Andy) |

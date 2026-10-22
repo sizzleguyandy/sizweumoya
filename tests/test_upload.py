@@ -351,3 +351,31 @@ def test_mode_follows_what_is_on_file(env):
     assert [w["date"] for w in plans.tomorrow_session(conn, rid, today)] == ["2026-10-23"]
     # After the race the programme has ended: back to option 1.
     assert plans.mode(conn, rid, date(2026, 11, 16))["mode"] == "monitor"
+
+
+def test_week_summary_zones_and_programme(env):
+    conn, runner, folder, _ = env
+    rid = runner["runner_id"]
+    conn.execute("UPDATE runners SET hr_zones='[132,144,152,162]', max_hr=184, easy_hr_cap=144")
+    conn.commit()
+    start = queries.week_start(date.today())
+    when = datetime.combine(start, datetime.min.time(), UTC).replace(hour=5)
+    runner = conn.execute("SELECT * FROM runners").fetchone()
+    upload.process_path(conn, runner, _save(folder, "a.fit", run_fit(when, seconds=1800, hr=140)))
+    week = queries.week_summary(conn, rid, start)
+    assert week["coaching_mode"] == "monitor" and "vs_programme" not in week
+    easy = week["time_in_zones"][1]
+    assert easy["name"] == "Easy" and easy["minutes"] == 30 and easy["pct"] == 100
+    assert week["total_time"] == "30:00" and week["easy_runs_over_hr_cap"] == (0, 1)
+
+    pid = conn.execute("INSERT INTO plans (runner_id, type, start_date, end_date) VALUES (?,?,?,?)",
+                       (rid, "run", start.isoformat(), (start + timedelta(days=60)).isoformat())).lastrowid
+    for off, kind, km in [(1, "easy", 5), (6, "long", 12)]:
+        conn.execute("INSERT INTO planned_workouts (plan_id, runner_id, date, description, target, status)"
+                     " VALUES (?,?,?,?,?,?)", (pid, rid, (start + timedelta(days=off)).isoformat(), kind,
+                                               json.dumps({"kind": kind, "km": km, "week": 3}),
+                                               "missed" if off == 1 else "planned"))
+    conn.commit()
+    vs = queries.week_summary(conn, rid, start)["vs_programme"]
+    assert vs["planned_km"] == 17 and vs["actual_km"] == 5.4 and vs["sessions_planned"] == 2
+    assert len(vs["missed"]) == 1 and vs["long_run"]["planned_km"] == 12

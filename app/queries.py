@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 import json
 
-from . import plans, stats
+from . import paces, plans, stats
 from .db import rows
 
 NOTE_CATEGORIES = {"pattern", "preference", "health", "life", "motivation", "milestone"}
@@ -41,6 +41,29 @@ def week_start(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
+def _week_detail(conn, rid: int, start: date, end: date) -> dict:
+    """Time on feet, time in each HR zone (named, with bpm), longest run, easy runs over the cap."""
+    runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (rid,)).fetchone()
+    runs = rows(conn.execute(
+        "SELECT distance_km, duration_s, avg_hr, run_type, z1_s, z2_s, z3_s, z4_s, z5_s FROM runs"
+        " WHERE runner_id=? AND date>=? AND date<?", (rid, start.isoformat(), end.isoformat())))
+    secs = [sum(r[f"z{i}_s"] or 0 for r in runs) for i in range(1, 6)]
+    total_z = sum(secs)
+    zones = []
+    for z, s_ in zip(paces.zones(runner), secs):
+        zones.append({**z, "minutes": round(s_ / 60), "pct": round(100 * s_ / total_z) if total_z else 0})
+    cap = runner["easy_hr_cap"]
+    easy_runs = [r for r in runs if r["run_type"] in ("easy", "long") and r["avg_hr"]]
+    return {
+        "total_time": paces._fmt_time(sum(r["duration_s"] or 0 for r in runs)) if runs else "0:00",
+        "longest_run_km": round(max((r["distance_km"] or 0 for r in runs), default=0), 1),
+        "time_in_zones": zones,
+        # Runs imported from a spreadsheet have no zone detail, so they are not in time_in_zones.
+        "runs_without_zone_detail": sum(1 for r in runs if not any(r[f"z{i}_s"] for i in range(1, 6))),
+        "easy_runs_over_hr_cap": (sum(1 for r in easy_runs if r["avg_hr"] > cap), len(easy_runs)) if cap else None,
+    }
+
+
 def week_summary(conn, rid: int, start: date | None = None) -> dict:
     start = start or week_start(date.today())
     end, prev = start + timedelta(days=7), start - timedelta(days=7)
@@ -70,6 +93,10 @@ def week_summary(conn, rid: int, start: date | None = None) -> dict:
         "strength_sessions": strength, "easy_pct": round(easy * 100),
         "tips": stats.week_tips(km, last_km, easy, days_since),
     }
+    result.update(_week_detail(conn, rid, start, end))
+    result["coaching_mode"] = plans.mode(conn, rid, end - timedelta(days=1))["mode"]
+    if result["coaching_mode"] == "guided":
+        result["vs_programme"] = plans.week_vs_programme(conn, rid, start, end, result)
     conn.execute(
         "INSERT INTO weekly_summary (runner_id, week_start, total_km, runs, strength_sessions, easy_pct, km_change_pct)"
         " VALUES (?,?,?,?,?,?,?) ON CONFLICT(runner_id, week_start) DO UPDATE SET total_km=excluded.total_km,"

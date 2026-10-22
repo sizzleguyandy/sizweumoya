@@ -45,8 +45,11 @@ def _check_jobs_token(request: Request) -> None:
 @app.post("/jobs/weekly")
 def job_weekly(request: Request, tasks: BackgroundTasks):
     _check_jobs_token(request)
-    tasks.add_task(_for_each_runner, "It's the end of the week. Get the week summary and send the weekly "
-                   "summary with the mileage check and one focus. Then rewrite the runner summary.")
+    tasks.add_task(_for_each_runner, "It's the end of the week. Call get_week_summary and send the weekly "
+                   "summary: distance, time, time in each heart rate zone (by name, in minutes), the "
+                   "mileage check and one focus. If coaching_mode is guided, compare the week with "
+                   "vs_programme: planned against actual km, sessions done and missed, and the long "
+                   "run against its target. Then rewrite the runner summary.")
     return {"queued": True}
 
 

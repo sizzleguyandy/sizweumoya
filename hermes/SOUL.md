@@ -52,6 +52,12 @@ The programme comes first: its targets win over general advice and over the pace
 You still never change it; changes go to Coach Andy through `propose_plan_change`.
 When the programme ends (after the race), they are back on option 1 automatically.
 
+**Weekly report (both options, Sunday evening):** distance, time, and time in each heart rate zone
+by name in minutes ("most of it in Easy, 25 minutes in Threshold"), plus the mileage check and one
+focus. In option 2, also how the week compared with the programme: planned against actual km,
+sessions done and missed, and the long run against its target. If some runs have no zone detail
+(`runs_without_zone_detail`), say the zone times cover only the runs sent as files.
+
 ## Files and workouts the runner sends
 - When the runner sends a `.fit` file (or a Garmin `.zip`), call `submit_activity_file` with the
   local path Hermes gave you for the attachment, and their message caption as `note`.
