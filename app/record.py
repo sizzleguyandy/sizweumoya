@@ -14,6 +14,7 @@ import threading
 from datetime import date, datetime
 from pathlib import Path
 
+from . import trends
 from .config import settings
 from .db import SCHEMA, rows, session
 
@@ -50,6 +51,52 @@ SECTIONS = {
 }
 
 
+# Ready-made views: the same SQL serves the person's own file (one person, no filter) and
+# get_record on runners.db (filtered to the person). {w} is the runner filter, {a} its "AND" form.
+VIEWS = {
+    "weekly_km": """SELECT date(date, 'weekday 0', '-6 days') AS week_start, ROUND(SUM(distance_km), 1) AS km,
+        COUNT(*) AS runs, ROUND(SUM(duration_s) / 60.0) AS minutes, ROUND(MAX(distance_km), 1) AS longest_km
+        FROM runs {w} GROUP BY 1 ORDER BY 1 DESC""",
+    "monthly_km": """SELECT substr(date, 1, 7) AS month, ROUND(SUM(distance_km), 1) AS km, COUNT(*) AS runs,
+        ROUND(SUM(duration_s) / 60.0) AS minutes, ROUND(MAX(distance_km), 1) AS longest_km
+        FROM runs {w} GROUP BY 1 ORDER BY 1 DESC""",
+    "personal_bests": """SELECT 'longest run' AS record, ROUND(distance_km, 2) AS value, 'km' AS unit, date
+          FROM (SELECT * FROM runs {w} ORDER BY distance_km DESC LIMIT 1)
+        UNION ALL SELECT 'fastest ' || d.label || '+ (avg pace)', (CAST(r.avg_pace_s_km AS INTEGER) / 60) || ':'
+          || printf('%02d', CAST(r.avg_pace_s_km AS INTEGER) % 60), 'min/km', r.date
+          FROM (SELECT 5 AS km, '5K' AS label UNION ALL SELECT 10, '10K' UNION ALL SELECT 21.1, 'half'
+                UNION ALL SELECT 42.2, 'marathon') d
+          JOIN runs r ON r.id = (SELECT id FROM runs WHERE distance_km >= d.km AND treadmill = 0
+                                 AND avg_pace_s_km IS NOT NULL {a} ORDER BY avg_pace_s_km LIMIT 1)""",
+    "lift_records": """SELECT t.exercise, MAX(t.weight_kg) AS best_kg,
+        ROUND(MAX(t.weight_kg * (1 + COALESCE(t.reps, 1) / 30.0)), 1) AS est_1rm_kg,
+        COUNT(*) AS sets_logged, MAX(s.date) AS last_done
+        FROM strength_sets t JOIN strength_sessions s ON s.id = t.session_id
+        WHERE t.weight_kg > 0 {a2} GROUP BY t.exercise ORDER BY t.exercise""",
+}
+
+
+def _view_sql(name: str, filtered: bool) -> str:
+    return VIEWS[name].format(w="WHERE runner_id=?" if filtered else "",
+                              a="AND runner_id=?" if filtered else "",
+                              a2="AND t.runner_id=?" if filtered else "")
+
+
+def insights(conn, rid: int) -> dict:
+    """The latest worked-out picture: progress, load, taper and strength records."""
+    from datetime import date as _d
+    from . import plans, queries
+    m = plans.mode(conn, rid)
+    out = {"focus": m["focus"], "coaching": {"running": m["running"], "strength": m["strength"]}}
+    if m["focus"] in ("running", "hybrid"):
+        out["progress"] = trends.progress(conn, rid)
+        out["load_this_week"] = trends.load(conn, rid, queries.week_start(_d.today()))
+        out["taper"] = trends.taper(conn, rid)
+    if m["focus"] in ("strength", "hybrid"):
+        out["strength_records"] = trends.strength_records(conn, rid)
+    return out
+
+
 def path_for(profile: str) -> Path:
     return Path(settings.records_dir) / f"{profile}.db"
 
@@ -58,8 +105,16 @@ def get_record(conn, rid: int, section: str, since: str = "", until: str = "", l
     """Read one section of the runner's record, optionally between two dates (YYYY-MM-DD)."""
     if section == "summary":
         return summary(conn, rid)
+    if section == "insights":
+        return {"section": section, **insights(conn, rid)}
+    if section in VIEWS:
+        sql = _view_sql(section, True)
+        args = [rid] * sql.count("?")
+        items = rows(conn.execute(sql, args))[:max(1, min(int(limit or 50), 500))]
+        return {"section": section, "count": len(items), "items": items}
     if section not in SECTIONS:
-        return {"error": f"section must be one of: summary, {', '.join(SECTIONS)}"}
+        return {"error": "section must be one of: summary, insights, "
+                         f"{', '.join(VIEWS)}, {', '.join(SECTIONS)}"}
     sql, col, order = SECTIONS[section]
     args: list = [rid]
     for value, op in ((since, ">="), (until, "<=")):
@@ -124,6 +179,15 @@ def export_runner(conn, rid: int, dest: Path | None = None) -> Path | None:
             if data:
                 out.executemany(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                                 [tuple(row) for row in data])
+        for name in VIEWS:
+            out.execute(f"CREATE VIEW {name} AS {_view_sql(name, False)}")
+        out.execute("CREATE TABLE latest_insights (computed_at TEXT, section TEXT, data TEXT)")
+        try:
+            now = datetime.now().isoformat(timespec="seconds")
+            out.executemany("INSERT INTO latest_insights VALUES (?,?,?)",
+                            [(now, k, json.dumps(v, default=str)) for k, v in insights(conn, rid).items()])
+        except Exception:
+            log.exception("insights for runner %s could not be worked out", rid)
         out.execute("CREATE TABLE record_info (exported_at TEXT, source TEXT)")
         out.execute("INSERT INTO record_info VALUES (?, ?)",
                     (datetime.now().isoformat(timespec="seconds"), "runners.db"))

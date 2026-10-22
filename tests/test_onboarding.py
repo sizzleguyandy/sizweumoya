@@ -177,3 +177,30 @@ def test_schedule_export_returns_at_once_and_writes_the_file(tmp_path, monkeypat
     while time.time() < deadline and (not target.exists() or record._running):
         time.sleep(0.02)
     assert target.exists() and not record._running
+
+
+def test_views_in_the_file_and_on_request(conn, tmp_path):
+    rid, _, _ = add_runner(conn, "Tom", "111", 185, None)
+    other, _, _ = add_runner(conn, "Ann", "222", 185, None)
+    for rr, d, km, pace in ((rid, "2026-10-13", 5.2, 330), (rid, "2026-10-18", 12.0, 400),
+                            (rid, "2026-10-20", 10.5, 350), (other, "2026-10-20", 30.0, 250)):
+        conn.execute("INSERT INTO runs (runner_id, activity_key, date, distance_km, duration_s, avg_pace_s_km)"
+                     " VALUES (?,?,?,?,?,?)", (rr, f"{rr}{d}", d, km, int(km * pace), pace))
+    ingest.store_strength_text(conn, _runner(conn, rid), "Squat 3x5 80kg", "2026-10-21")
+    conn.commit()
+
+    weeks = record.get_record(conn, rid, "weekly_km")["items"]
+    assert [(w["week_start"], w["km"]) for w in weeks] == [("2026-10-19", 10.5), ("2026-10-12", 17.2)]
+    pbs = {p["record"]: p["value"] for p in record.get_record(conn, rid, "personal_bests")["items"]}
+    assert pbs["longest run"] == 12.0 and pbs["fastest 5K+ (avg pace)"] == "5:30"
+    assert pbs["fastest 10K+ (avg pace)"] == "5:50"            # Ann's 30 km never counts
+    lifts = record.get_record(conn, rid, "lift_records")["items"]
+    assert lifts[0]["best_kg"] == 80 and lifts[0]["est_1rm_kg"] == pytest.approx(93.3, abs=0.1)
+    assert "progress" in record.get_record(conn, rid, "insights")
+
+    f = sqlite3.connect(record.export_runner(conn, rid, tmp_path / "tom.db"))
+    assert f.execute("SELECT km FROM weekly_km ORDER BY week_start").fetchall() == [(17.2,), (10.5,)]
+    assert f.execute("SELECT value FROM personal_bests WHERE record='longest run'").fetchone()[0] == 12.0
+    assert f.execute("SELECT best_kg FROM lift_records").fetchone()[0] == 80
+    sections = {r[0] for r in f.execute("SELECT section FROM latest_insights")}
+    assert {"focus", "progress", "load_this_week"} <= sections

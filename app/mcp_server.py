@@ -10,6 +10,7 @@ import hmac
 import logging
 import os
 import threading
+from pathlib import Path
 from contextlib import contextmanager
 
 from mcp.server.mcpserver import Context, MCPServer
@@ -324,12 +325,38 @@ def save_report(ctx: Context, type: str, text: str, basis: dict | None = None) -
 @mcp.tool()
 def get_my_record(ctx: Context, section: str = "summary", since: str = "", until: str = "",
                   limit: int = 50) -> dict:
-    """Look anything up in the runner's record. section: summary (what's on file), runs,
-    splits (per-km pace and HR), strength (every set), reports (everything sent to them),
-    messages, notes, races, plan, weekly, fitness, tips. since/until: YYYY-MM-DD.
+    """Look anything up in the person's record. section: summary (what's on file), insights
+    (latest progress status, load flag, taper and lift records in one go), weekly_km,
+    monthly_km, personal_bests, lift_records, runs, splits (per-km pace and HR), strength
+    (every set), reports (everything sent to them), messages, notes, races, plan, weekly,
+    fitness, tips. since/until (YYYY-MM-DD) apply to the date-based sections.
     Example: a question about Sunday's run -> section="splits", since=until=that date."""
     with session() as conn:
         return record.get_record(conn, _rid(ctx), section, since, until, limit)
+
+
+@mcp.tool()
+def send_my_data_file(ctx: Context) -> str:
+    """The person asked for a copy of their data. Sends them their complete record as a .db
+    file in this chat (it opens in free tools such as DB Browser for SQLite), with ready-made
+    views: weekly_km, monthly_km, personal_bests, lift_records, and latest_insights."""
+    r = _runner(ctx)
+
+    def _work() -> None:
+        import tempfile
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                first = "".join(ch for ch in (r["name"].split() or ["my"])[0].lower() if ch.isalnum()) or "my"
+                dest = Path(tmp) / f"{first}-training-record.db"
+                with session() as conn:
+                    record.export_runner(conn, r["runner_id"], dest)
+                hermes.send_telegram_file(r["telegram_chat_id"], str(dest),
+                                          "Your complete training record. Open it with DB Browser for SQLite.")
+        except Exception:
+            log.exception("data file for runner %s could not be sent", r["runner_id"])
+
+    threading.Thread(target=_work, name=f"data-file-{r['runner_id']}", daemon=True).start()
+    return "Your file is on its way; it should arrive in this chat in a moment."
 
 
 @mcp.tool()

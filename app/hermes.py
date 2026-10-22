@@ -19,6 +19,7 @@ never start a turn in another profile.
 Everything HTTP lives in this module; callers use ``run_and_deliver`` / ``notify_coach``.
 """
 import logging
+import os
 import time
 
 import httpx
@@ -157,6 +158,16 @@ def send_telegram(chat_id: str, text: str) -> None:
         ).raise_for_status()
 
 
+def send_telegram_file(chat_id: str, path: str, caption: str = "") -> None:
+    """Send a file (e.g. a person's own data export) to their chat."""
+    if not settings.telegram_bot_token or not chat_id:
+        raise HermesError("telegram is not configured for sending files")
+    with open(path, "rb") as f:
+        httpx.post(f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendDocument",
+                   data={"chat_id": chat_id, "caption": caption[:1000]},
+                   files={"document": (os.path.basename(path), f)}, timeout=60).raise_for_status()
+
+
 def run_and_deliver(runner, prompt: str, *, kind: str = "job", **kwargs) -> str:
     """Start a turn in the runner's profile, send the reply to their chat, save it in their
     record, return the text."""
@@ -169,7 +180,7 @@ def run_and_deliver(runner, prompt: str, *, kind: str = "job", **kwargs) -> str:
         from .db import session
         with session() as conn:
             queries.log_message(conn, runner["runner_id"], "out", kind, text)
-            record.export_runner(conn, runner["runner_id"])
+        record.schedule_export(runner["runner_id"])
     except Exception:
         log.exception("could not save the delivered message for runner %s", runner["runner_id"])
     return text

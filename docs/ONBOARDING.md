@@ -47,6 +47,11 @@ profile, runs, per-km splits, strength sessions and every set, every report and 
 notes (including profile facts and gear), races, plans, weekly and fitness history, alerts and
 approvals. Secrets are never copied into it.
 
+Each file also has ready-made views, `weekly_km`, `monthly_km`, `personal_bests` and
+`lift_records`, and a `latest_insights` table (progress status, load flag, taper, lift records
+as worked out at export time). People can ask Sarah for any of these, or for the file itself
+(`send_my_data_file`, sent to their chat).
+
 Sarah saves with `save_report` (every debrief and report) and `add_coach_note` (facts), and
 looks anything up with `get_my_record(section, since, until)`.
 
