@@ -329,3 +329,25 @@ def test_paces_and_zones_update_with_new_benchmark(env):
     perf = paces.profile(conn, rid, today)["performance"]
     assert perf["vdot"] > old_vdot and perf["race_estimates"]["5K"] == "28:00"
     assert perf["training_paces"]["threshold"]["from"] < "6:13/km"
+
+
+def test_mode_follows_what_is_on_file(env):
+    from app import plans
+    conn, runner, _, _ = env
+    rid = runner["runner_id"]
+    today = date(2026, 10, 22)
+    assert plans.mode(conn, rid, today) == {"mode": "monitor", "run_programme": None, "strength_programme": False}
+    assert plans.sessions_around(conn, rid, today) == {"mode": "monitor", "sessions": []}
+    pid = conn.execute("INSERT INTO plans (runner_id, type, start_date, end_date) VALUES (?,?,?,?)",
+                       (rid, "run", "2026-08-31", "2026-11-15")).lastrowid
+    for d, desc, km in [("2026-10-20", "Easy run", 5), ("2026-10-22", "Hill reps", 7), ("2026-10-23", "Easy run", 5)]:
+        conn.execute("INSERT INTO planned_workouts (plan_id, runner_id, date, description, target) VALUES (?,?,?,?,?)",
+                     (pid, rid, d, desc, json.dumps({"kind": "easy", "km": km})))
+    conn.commit()
+    m = plans.mode(conn, rid, today)
+    assert m["mode"] == "guided" and m["run_programme"]["weeks_left"] == 4
+    s = plans.sessions_around(conn, rid, today)
+    assert s["today"][0]["description"] == "Hill reps" and s["last"][0]["date"] == "2026-10-20"
+    assert [w["date"] for w in plans.tomorrow_session(conn, rid, today)] == ["2026-10-23"]
+    # After the race the programme has ended: back to option 1.
+    assert plans.mode(conn, rid, date(2026, 11, 16))["mode"] == "monitor"

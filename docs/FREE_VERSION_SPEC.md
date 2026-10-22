@@ -254,3 +254,20 @@ Sports Medicine systematic review). Tool: `get_strength_review` (`app/strength.p
 | Rest | 2–3 min compound, 1–2 min isolation | Not in the data; used in tips |
 | Deloading | Only when fatigue or performance call for it | No fixed deload week |
 | Exercise selection | Full, comfortable range of motion, loadable | Exercises mapped to muscle groups |
+
+## 9. Two coaching modes (built)
+
+Decided by what is on the runner's file, never asked. No programme on file means option 1.
+
+| | Option 1 `monitor` | Option 2 `guided` |
+| --- | --- | --- |
+| When | No active run programme | Coach Andy's run programme on file and not yet ended |
+| Feedback, flags, taper suggestion, chat | Yes | Yes |
+| Strength the runner logs themselves | Tracked | Tracked |
+| Talks the runner through the programme | No | Yes: `get_my_sessions`, evening preview, every run compared with its session |
+| Writes or changes a plan | Never | Never (changes go to Coach Andy) |
+
+`get_my_profile` returns `coaching.mode`. When the programme's end date passes, the runner
+returns to option 1. A strength programme on file is reported (`strength_programme`) for the
+paid strength service; option 1 strength is the runner's own logged sessions.
+Job: `POST /jobs/session-preview` (daily, evening) previews tomorrow's session for guided runners.

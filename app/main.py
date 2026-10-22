@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
-from . import hermes, queries
+from . import hermes, plans, queries
 from .db import connect, init_db, session
 
 logging.basicConfig(level=logging.INFO)
@@ -66,6 +66,27 @@ def _for_each_runner(prompt: str) -> None:
             hermes.run_and_deliver(r, prompt)
         except Exception:
             log.exception("job failed for runner %s", r["runner_id"])
+
+
+@app.post("/jobs/session-preview")
+def job_session_preview(request: Request, tasks: BackgroundTasks):
+    """Evening before a programme session (guided runners only): a short preview."""
+    _check_jobs_token(request)
+    with session() as conn:
+        due = [r for r in conn.execute("SELECT * FROM runners WHERE active=1 AND hermes_api_key IS NOT NULL")
+               if plans.tomorrow_session(conn, r["runner_id"])]
+    for r in due:
+        tasks.add_task(_deliver, r, "Tomorrow there is a session in the runner's programme. Call "
+                       "get_my_sessions and send a short preview: what it is, the distance, and the heart "
+                       "rate or effort to aim for. Two or three sentences, no more.")
+    return {"queued": len(due)}
+
+
+def _deliver(runner, prompt: str) -> None:
+    try:
+        hermes.run_and_deliver(runner, prompt)
+    except Exception:
+        log.exception("job failed for runner %s", runner["runner_id"])
 
 
 @app.post("/jobs/quiet-runners")

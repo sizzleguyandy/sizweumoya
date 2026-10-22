@@ -90,3 +90,61 @@ def races(conn, rid: int, today: date | None = None) -> list[dict]:
         r["days_to_go"] = (date.fromisoformat(r["date"]) - today).days
         out.append(r)
     return out
+
+
+# ---- coaching mode -------------------------------------------------------------
+# Option 1 "monitor": no programme on file. Feedback, flags, taper suggestion, chat.
+# Option 2 "guided": a run programme from Coach Andy is on file and still running.
+#   Everything in option 1, plus Sarah talks the runner through the programme.
+
+def _active(conn, rid: int, type_: str, today: date):
+    return conn.execute(
+        "SELECT * FROM plans WHERE runner_id=? AND type=? AND active=1"
+        " AND (end_date IS NULL OR end_date>=?) ORDER BY start_date DESC LIMIT 1",
+        (rid, type_, today.isoformat())).fetchone()
+
+
+def mode(conn, rid: int, today: date | None = None) -> dict:
+    """Which option applies, decided only by what is on file. No programme means option 1."""
+    today = today or date.today()
+    run = _active(conn, rid, "run", today)
+    strength = _active(conn, rid, "strength", today)
+    out = {"mode": "guided" if run else "monitor",
+           "run_programme": None, "strength_programme": bool(strength)}
+    if run:
+        out["run_programme"] = {"start": run["start_date"], "end": run["end_date"],
+                                "weeks_left": max(0, -(-(date.fromisoformat(run["end_date"]) - today).days // 7))
+                                if run["end_date"] else None}
+    return out
+
+
+def sessions_around(conn, rid: int, today: date | None = None) -> dict:
+    """Guided mode: the last session, today's, and the next few, from the active run programme."""
+    today = today or date.today()
+    m = mode(conn, rid, today)
+    if m["mode"] != "guided":
+        return {"mode": "monitor", "sessions": []}
+
+    def pick(sql, args):
+        out = []
+        for w in conn.execute(sql, args).fetchall():
+            t = _target(w)
+            out.append({"date": w["date"], "description": w["description"], "status": w["status"],
+                        **{k: t[k] for k in ("kind", "km", "hr_range", "climb_m", "week", "phase") if k in t}})
+        return out
+
+    base = ("SELECT w.* FROM planned_workouts w JOIN plans p ON p.id=w.plan_id WHERE w.runner_id=?"
+            " AND p.active=1 AND p.type='run' AND ")
+    return {
+        "mode": "guided",
+        "last": pick(base + "w.date<? ORDER BY w.date DESC LIMIT 1", (rid, today.isoformat())),
+        "today": pick(base + "w.date=?", (rid, today.isoformat())),
+        "next": pick(base + "w.date>? ORDER BY w.date LIMIT 3", (rid, today.isoformat())),
+    }
+
+
+def tomorrow_session(conn, rid: int, today: date | None = None) -> list:
+    today = today or date.today()
+    s = sessions_around(conn, rid, today)
+    tomorrow = (today + timedelta(days=1)).isoformat()
+    return [w for w in s.get("next", []) if w["date"] == tomorrow]

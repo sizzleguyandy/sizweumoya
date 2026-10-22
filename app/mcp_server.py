@@ -47,9 +47,20 @@ def _rid(ctx: Context) -> int:
 
 @mcp.tool()
 def get_my_profile(ctx: Context) -> dict:
-    """Runner profile: name, HR zones, goal, units, tier."""
+    """Runner profile: name, HR zones, goal, units, tier, and `coaching` - the mode:
+    "monitor" (option 1, no programme on file) or "guided" (option 2, a run programme from
+    Coach Andy is on file). Read this first; it decides how you work with this runner."""
     with session() as conn:
-        return queries.profile(conn, _rid(ctx))
+        rid = _rid(ctx)
+        return queries.profile(conn, rid) | {"coaching": plans.mode(conn, rid)}
+
+
+@mcp.tool()
+def get_my_sessions(ctx: Context) -> dict:
+    """Guided mode only: last, today's and the next three sessions of the run programme, with
+    km, kind, HR range and climb. In monitor mode it returns no sessions."""
+    with session() as conn:
+        return plans.sessions_around(conn, _rid(ctx))
 
 
 @mcp.tool()
