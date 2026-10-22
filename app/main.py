@@ -53,6 +53,19 @@ def job_weekly(request: Request, tasks: BackgroundTasks):
     return {"queued": True}
 
 
+@app.post("/jobs/monthly")
+def job_monthly(request: Request, tasks: BackgroundTasks):
+    """1st of the month: last month's report (includes the fitness check)."""
+    _check_jobs_token(request)
+    tasks.add_task(_for_each_runner, "It's the start of a new month. Call get_month_summary for last month "
+                   "and send the monthly report: distance and time against the month before, how the weeks "
+                   "built, time in each heart rate zone, the longest run, any time trial or race, strength "
+                   "sessions, and the fitness check with its progress status (green, yellow or grey, "
+                   "never red). If coaching_mode is guided, add how the month went against the programme. "
+                   "Finish with one focus for the month ahead.")
+    return {"queued": True}
+
+
 @app.post("/jobs/fitness")
 def job_fitness(request: Request, tasks: BackgroundTasks):
     _check_jobs_token(request)

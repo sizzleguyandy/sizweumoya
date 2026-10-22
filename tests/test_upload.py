@@ -379,3 +379,17 @@ def test_week_summary_zones_and_programme(env):
     vs = queries.week_summary(conn, rid, start)["vs_programme"]
     assert vs["planned_km"] == 17 and vs["actual_km"] == 5.4 and vs["sessions_planned"] == 2
     assert len(vs["missed"]) == 1 and vs["long_run"]["planned_km"] == 12
+
+
+def test_month_summary(env):
+    conn, runner, folder, _ = env
+    rid = runner["runner_id"]
+    for d, km in [("2026-09-10", 5.0), ("2026-10-02", 6.0), ("2026-10-20", 10.0)]:
+        conn.execute("INSERT INTO runs (runner_id, activity_key, date, distance_km, duration_s, run_type)"
+                     " VALUES (?,?,?,?,?,?)", (rid, f"k{d}", d, km, int(km * 420), "easy"))
+    conn.commit()
+    m = queries.month_summary(conn, rid, 2026, 10)
+    assert m["month"] == "October 2026" and m["total_km"] == 16.0 and m["previous_month_km"] == 5.0
+    assert m["longest_run_km"] == 10.0 and sum(w["km"] for w in m["weeks"]) == 16.0
+    assert m["progress_status"] == "grey" and m["coaching_mode"] == "monitor"
+    assert queries.month_summary(conn, rid, 2026, 12)["month"] == "December 2026"

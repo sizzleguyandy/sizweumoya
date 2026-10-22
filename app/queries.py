@@ -108,6 +108,47 @@ def week_summary(conn, rid: int, start: date | None = None) -> dict:
     return result
 
 
+PROGRESS = {"fitter": "green", "steady": "yellow", "dipping": "grey", "insufficient": "grey"}
+
+
+def month_summary(conn, rid: int, year: int, month: int) -> dict:
+    """Calendar month report: totals, zones, weeks, strength, fitness and, if guided, the programme."""
+    start = date(year, month, 1)
+    end = date(year + (month == 12), month % 12 + 1, 1)
+    prev = date(start.year - (start.month == 1), (start.month - 2) % 12 + 1, 1)
+    q = ("SELECT COALESCE(SUM(distance_km),0) km, COUNT(*) n FROM runs WHERE runner_id=? AND date>=? AND date<?")
+    cur = conn.execute(q, (rid, start.isoformat(), end.isoformat())).fetchone()
+    last = conn.execute(q, (rid, prev.isoformat(), start.isoformat())).fetchone()
+    weeks, w = [], week_start(start)
+    while w < end:
+        km = conn.execute(q, (rid, max(w, start).isoformat(), min(w + timedelta(days=7), end).isoformat())).fetchone()
+        weeks.append({"week_of": w.isoformat(), "km": round(km["km"], 1), "runs": km["n"]})
+        w += timedelta(days=7)
+    strength = rows(conn.execute(
+        "SELECT COUNT(DISTINCT s.id) sessions, COUNT(t.id) sets FROM strength_sessions s LEFT JOIN strength_sets t"
+        " ON t.session_id=s.id WHERE s.runner_id=? AND s.date>=? AND s.date<?",
+        (rid, start.isoformat(), end.isoformat())))[0]
+    fit = fitness_trend(conn, rid, min(end - timedelta(days=1), date.today()))
+    out = {
+        "month": start.strftime("%B %Y"),
+        "total_km": round(cur["km"], 1), "runs": cur["n"],
+        "previous_month_km": round(last["km"], 1),
+        "km_change_pct": stats.km_change_pct(cur["km"], last["km"]),
+        "weeks": weeks,
+        **_week_detail(conn, rid, start, end),
+        "benchmarks": rows(conn.execute(
+            "SELECT date, distance_km, duration_s, run_type FROM runs WHERE runner_id=? AND date>=? AND date<?"
+            " AND run_type IN ('benchmark','race') ORDER BY date", (rid, start.isoformat(), end.isoformat()))),
+        "strength": strength,
+        "fitness": fit,
+        "progress_status": PROGRESS.get(fit["verdict"], "grey"),
+        "coaching_mode": plans.mode(conn, rid, end - timedelta(days=1))["mode"],
+    }
+    if out["coaching_mode"] == "guided":
+        out["vs_programme"] = plans.week_vs_programme(conn, rid, start, end, out)
+    return out
+
+
 def fitness_trend(conn, rid: int, today: date | None = None) -> dict:
     today = today or date.today()
     w1, w2 = today - timedelta(days=28), today - timedelta(days=56)

@@ -123,6 +123,25 @@ def get_week_summary(ctx: Context) -> dict:
 
 
 @mcp.tool()
+def get_month_summary(ctx: Context, month: str = "") -> dict:
+    """Monthly report for a calendar month, `month` as YYYY-MM (default: last month).
+    Totals vs the previous month, km per week, time, time in each named HR zone, longest run,
+    benchmarks, strength sessions, the fitness check and progress_status (green/yellow/grey,
+    never red). In guided mode also vs_programme for the month."""
+    if month:
+        try:
+            y, m = (int(x) for x in month.split("-"))
+            _date(y, m, 1)
+        except ValueError:
+            return {"error": "month must be YYYY-MM"}
+    else:
+        first = _date.today().replace(day=1)
+        y, m = (first.year - 1, 12) if first.month == 1 else (first.year, first.month - 1)
+    with session() as conn:
+        return queries.month_summary(conn, _rid(ctx), y, m)
+
+
+@mcp.tool()
 def get_fitness_trend(ctx: Context) -> dict:
     """Easy pace at the same HR, last 4 weeks vs previous 4: fitter / steady / dipping / insufficient."""
     with session() as conn:

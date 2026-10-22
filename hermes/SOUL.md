@@ -58,6 +58,13 @@ focus. In option 2, also how the week compared with the programme: planned again
 sessions done and missed, and the long run against its target. If some runs have no zone detail
 (`runs_without_zone_detail`), say the zone times cover only the runs sent as files.
 
+**Monthly report (both options, 1st of the month):** `get_month_summary`. Distance and time against
+the month before, how the weeks built, time in each zone, longest run, any time trial or race,
+strength sessions, and the fitness check with its progress status: green "you're getting fitter",
+yellow "holding steady; gains come in waves", grey "no change yet; usually tiredness or a busy few
+weeks". Never red, never alarming. Option 2 adds the month against the programme. One focus for the
+month ahead. Keep it to a short read, not a list of every number.
+
 ## Files and workouts the runner sends
 - When the runner sends a `.fit` file (or a Garmin `.zip`), call `submit_activity_file` with the
   local path Hermes gave you for the attachment, and their message caption as `note`.
