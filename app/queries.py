@@ -65,6 +65,50 @@ def _week_detail(conn, rid: int, start: date, end: date) -> dict:
     }
 
 
+def _bar(value: float, target: float, width: int = 10) -> str:
+    filled = 0 if not target else max(0, min(width, round(width * value / target)))
+    return "\u25b0" * filled + "\u25b1" * (width - filled)
+
+
+LOAD_WORD = {"green": "Green (all good)", "amber": "Amber (keep an eye on it)", "red": "Red (ease off)"}
+
+
+def week_card(w: dict, start: date, today: date | None = None) -> str:
+    """The short graphic at the top of "My week": the same layout every time, built here so the
+    numbers are always the system's, never retyped by the model."""
+    today = today or date.today()
+    end = start + timedelta(days=6)
+    day = min(7, max(1, (today - start).days + 1))
+    head = f"MY WEEK  {start.day} {start:%b} - {end.day} {end:%b}" + (f"  (day {day} of 7)" if day < 7 else "")
+    lines = [head]
+    if w.get("focus") in ("running", "hybrid"):
+        vs = w.get("vs_programme") or {}
+        planned = vs.get("planned_km")
+        ref = planned or w.get("last_week_km") or 0
+        ref_text = f"of {planned:g} km planned" if planned else (f"last week {ref:g} km" if ref else "")
+        lines.append(f"Run       {w['total_km']:g} km  {_bar(w['total_km'], ref)}  {ref_text}".rstrip())
+        lines.append(f"          {w['runs']} run{'s' if w['runs'] != 1 else ''} · {w.get('total_time', '0:00')}"
+                     + (f" · {vs['done']}/{vs['sessions_planned']} sessions done" if planned else ""))
+        if w.get("runs") and w.get("time_in_zones") and any(z["minutes"] for z in w["time_in_zones"]):
+            lines.append(f"Easy      {w['easy_pct']}% of running time")
+    if w.get("focus") in ("strength", "hybrid") or w.get("strength_vs_programme"):
+        sv = w.get("strength_vs_programme") or {}
+        sets = ((w.get("strength_review") or {}).get("last_7_days") or {}).get("by_muscle") or {}
+        total_sets = sum(m["sets"] for m in sets.values())
+        if sv.get("sessions_planned"):
+            lines.append(f"Strength  {sv['done']} of {sv['sessions_planned']} sessions  "
+                         f"{_bar(sv['done'], sv['sessions_planned'], sv['sessions_planned'])}")
+        else:
+            lines.append(f"Strength  {w['strength_sessions']} session{'s' if w['strength_sessions'] != 1 else ''}"
+                         + (f" · {total_sets} sets" if total_sets else ""))
+    if w.get("load"):
+        lines.append(f"Load      {LOAD_WORD.get(w['load']['level'], w['load']['level'])}")
+    if w.get("taper"):
+        t = w["taper"]
+        lines.append(f"Race      {t['race']['name']} in {t['days_to_go']} days")
+    return "\n".join(lines)
+
+
 def week_summary(conn, rid: int, start: date | None = None) -> dict:
     start = start or week_start(date.today())
     end, prev = start + timedelta(days=7), start - timedelta(days=7)
@@ -108,6 +152,7 @@ def week_summary(conn, rid: int, start: date | None = None) -> dict:
         result["load"] = trends.load(conn, rid, start)
         if m["running"] != "guided":  # a programme from Coach Andy has its own taper
             result["taper"] = trends.taper(conn, rid)
+    result["card"] = week_card(result, start)
     conn.execute(
         "INSERT INTO weekly_summary (runner_id, week_start, total_km, runs, strength_sessions, easy_pct, km_change_pct,"
         " flag_level, flags) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(runner_id, week_start) DO UPDATE SET"

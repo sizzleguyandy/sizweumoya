@@ -113,3 +113,26 @@ def test_red_flag_goes_to_coach_amber_does_not(db, monkeypatch):
     run(c, rid, MON + timedelta(days=1), 25)
     assert main.escalate_load(c, TODAY) == ["Tom"] and "Red load flag" in sent[0]
     assert c.execute("SELECT flag_level FROM weekly_summary").fetchone()[0] == "red"
+
+
+def test_week_card(db):
+    from app.queries import week_card
+    w = {"focus": "hybrid", "total_km": 14.3, "last_week_km": 20, "runs": 2, "total_time": "1:25:47",
+         "easy_pct": 81, "time_in_zones": [{"minutes": 70}], "strength_sessions": 1,
+         "strength_review": {"last_7_days": {"by_muscle": {"quads": {"sets": 3}, "chest": {"sets": 3}}}},
+         "load": {"level": "green"}}
+    card = week_card(w, MON, today=TODAY)
+    assert card.splitlines() == [
+        "MY WEEK  19 Oct - 25 Oct  (day 4 of 7)",
+        "Run       14.3 km  ▰▰▰▰▰▰▰▱▱▱  last week 20 km",
+        "          2 runs · 1:25:47",
+        "Easy      81% of running time",
+        "Strength  1 session · 6 sets",
+        "Load      Green (all good)",
+    ]
+    w2 = {"focus": "running", "total_km": 20, "runs": 3, "total_time": "2:00:00", "easy_pct": 80,
+          "time_in_zones": [{"minutes": 100}], "strength_sessions": 0,
+          "vs_programme": {"planned_km": 33, "done": 2, "sessions_planned": 4}}
+    assert "of 33 km planned" in week_card(w2, MON, today=TODAY) and "2/4 sessions done" in week_card(w2, MON, today=TODAY)
+    lifter = week_card({"focus": "strength", "strength_sessions": 2}, MON, today=TODAY)
+    assert "Run" not in lifter and "Strength  2 sessions" in lifter
