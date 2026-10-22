@@ -204,3 +204,20 @@ def test_views_in_the_file_and_on_request(conn, tmp_path):
     assert f.execute("SELECT best_kg FROM lift_records").fetchone()[0] == 80
     sections = {r[0] for r in f.execute("SELECT section FROM latest_insights")}
     assert {"focus", "progress", "load_this_week"} <= sections
+
+
+def test_buttons_payload(monkeypatch):
+    from app import hermes, keyboard
+    posts = []
+
+    class R:
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(hermes, "settings", replace(config.settings, telegram_bot_token="tok"))
+    monkeypatch.setattr(hermes.httpx, "post", lambda url, json=None, **kw: posts.append((url, json)) or R())
+    keyboard.send({"telegram_chat_id": "111"})
+    url, body = posts[0]
+    assert url.endswith("/sendMessage") and body["chat_id"] == "111"
+    assert body["reply_markup"]["keyboard"] == [[{"text": "Today's plan"}, {"text": "My week"}]]
+    assert body["reply_markup"]["is_persistent"] is True

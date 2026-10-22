@@ -17,7 +17,7 @@ from mcp.server.mcpserver import Context, MCPServer
 
 from datetime import date as _date
 
-from . import hermes, ingest, onboarding, paces, plans, queries, record, strength, trends, upload
+from . import hermes, ingest, keyboard, onboarding, paces, plans, queries, record, strength, trends, upload
 from .config import settings
 from .db import session
 from .identity import AccessDenied, hash_token, resolve_runner
@@ -470,7 +470,11 @@ def finish_onboarding(ctx: Context) -> dict:
     except ValueError as e:
         return {"error": str(e)}
     hermes.notify_coach("New runner: " + res["coach_summary"])
-    return {"onboarded": True, "skipped": res["missing"]}
+    try:
+        keyboard.send(r)
+    except Exception:
+        log.exception("buttons could not be sent to runner %s", r["runner_id"])
+    return {"onboarded": True, "skipped": res["missing"], "buttons_sent": [b for row in keyboard.BUTTONS for b in row]}
 
 
 # ---- coach tools (coach profile only) -------------------------------------

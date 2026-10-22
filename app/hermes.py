@@ -158,6 +158,17 @@ def send_telegram(chat_id: str, text: str) -> None:
         ).raise_for_status()
 
 
+def send_keyboard(chat_id: str, text: str, buttons: list[list[str]]) -> None:
+    """Show buttons under the person's text box. Tapping one sends its label as a message."""
+    if not settings.telegram_bot_token or not chat_id:
+        raise HermesError("telegram is not configured")
+    httpx.post(f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage",
+               json={"chat_id": chat_id, "text": text,
+                     "reply_markup": {"keyboard": [[{"text": b} for b in row] for row in buttons],
+                                      "resize_keyboard": True, "is_persistent": True}},
+               timeout=20).raise_for_status()
+
+
 def send_telegram_file(chat_id: str, path: str, caption: str = "") -> None:
     """Send a file (e.g. a person's own data export) to their chat."""
     if not settings.telegram_bot_token or not chat_id:
