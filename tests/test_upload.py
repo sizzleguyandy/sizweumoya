@@ -297,3 +297,35 @@ def test_strength_review(env):
     assert lifts["lat pulldown"]["trend"] == "reps down" and lifts["squat"]["trend"] == "first session"
     assert strength.muscles_for("Preacher Curl (Machine)") == ["biceps"]
     assert strength.muscles_for("Triceps Dip (Assisted)")[0] == "triceps"
+
+
+def test_paces_and_zones_update_with_new_benchmark(env):
+    from app import paces
+    conn, runner, folder, _ = env
+    rid = runner["runner_id"]
+    conn.execute("UPDATE runners SET hr_zones='[132,144,152,162]', max_hr=184, easy_hr_cap=144, zones_locked=1")
+    conn.commit()
+    today = date.today()
+    prof = paces.profile(conn, rid, today)
+    assert prof["performance"]["available"] is False
+    assert prof["hr_zones"][1] == {"zone": 2, "name": "Easy", "from": 133, "to": 144}
+
+    def add(days_ago, km, secs, run_type, hr=140):
+        d = (today - timedelta(days=days_ago)).isoformat()
+        conn.execute("INSERT INTO runs (runner_id, activity_key, source, date, distance_km, duration_s,"
+                     " avg_pace_s_km, avg_hr, run_type) VALUES (?,?,?,?,?,?,?,?,?)",
+                     (rid, f"t:{days_ago}:{km}", "sheet", d, km, secs, secs / km, hr, run_type))
+        conn.commit()
+
+    add(30, 5.0, 30 * 60, "benchmark", 170)
+    add(10, 6.0, 6 * 430, "easy", 138)
+    add(5, 8.0, 8 * 425, "long", 140)
+    prof = paces.profile(conn, rid, today)
+    perf = prof["performance"]
+    assert perf["available"] and 30.5 <= perf["vdot"] <= 31.5 and perf["race_estimates"]["5K"] == "30:00"
+    assert prof["observed_easy"]["pace"] == "7:08/km"
+    old_vdot = perf["vdot"]
+    add(2, 5.0, 28 * 60, "benchmark", 172)   # a faster time trial moves everything
+    perf = paces.profile(conn, rid, today)["performance"]
+    assert perf["vdot"] > old_vdot and perf["race_estimates"]["5K"] == "28:00"
+    assert perf["training_paces"]["threshold"]["from"] < "6:13/km"

@@ -15,7 +15,7 @@ from mcp.server.mcpserver import Context, MCPServer
 
 from datetime import date as _date
 
-from . import hermes, ingest, plans, queries, strength, upload
+from . import hermes, ingest, paces, plans, queries, strength, upload
 from .config import settings
 from .db import session
 from .identity import AccessDenied, hash_token, resolve_runner
@@ -193,6 +193,18 @@ def get_current_plan(ctx: Context) -> dict:
     easy_hr_cap (see get_my_profile)."""
     with session() as conn:
         return queries.current_plan(conn, _rid(ctx))
+
+
+@mcp.tool()
+def get_my_paces_and_zones(ctx: Context) -> dict:
+    """The runner's heart rate zones and paces, recalculated from their latest data.
+    hr_zones: five named bands (bpm). easy_hr_cap: the ceiling for easy and long runs.
+    observed_easy: median pace and HR of recent outdoor easy runs under that ceiling.
+    performance: from the best time trial or race in the last 120 days: VDOT, training paces
+    (easy, marathon, threshold, interval) and race estimates. `available` false means no
+    recent benchmark; say a flat 5K time trial would unlock it."""
+    with session() as conn:
+        return paces.profile(conn, _rid(ctx))
 
 
 @mcp.tool()
