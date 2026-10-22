@@ -2,13 +2,13 @@ Privacy Policy
 ==============
 
 TR3D Core · Sizwe Umoya running coaching
-Last updated: [DATE]
+Last updated: 21 October 2026
 
 This policy explains what personal information TR3D Core ("we", "us") collects when you use our running coaching service, including our Telegram assistant "Sarah", how we use it, who we share it with, and the choices you have. We are based in South Africa and process personal information in line with the Protection of Personal Information Act, 2013 (POPIA). Where the EU or UK GDPR applies to you, we also follow it.
 
 1. WHO IS RESPONSIBLE
 
-The responsible party is [LEGAL NAME, e.g. Andrew Hammond trading as TR3D Core], [POSTAL ADDRESS], South Africa. Information Officer: [NAME]. Contact: [PRIVACY EMAIL].
+The responsible party is Andrew Hammond trading as TR3D Core, 39 Hely Hutchinson, Cape Town, Western Cape, South Africa. Information Officer: Andrew Hammond. Contact: andrew.hammond1985@gmail.com.
 
 2. WHAT WE COLLECT
 
@@ -49,7 +49,7 @@ We process your information to provide the service you asked for (performance of
 We never sell your personal information. We share it only with service providers who process it on our behalf and under our instructions:
 
 - Telegram, to deliver messages and files between you and the assistant.
-- [AI MODEL PROVIDER, e.g. OpenRouter and the model provider it routes to], to generate the assistant's feedback and replies.
+- OpenRouter, and DeepSeek models served through OpenRouter, to generate the assistant's feedback and replies.
 - Cloudflare, for secure network access to our server.
 - Microsoft OneDrive, for backups of our database in a private, access-controlled account.
 - Garmin, only if you connect your Garmin account (data flows from Garmin to us).
@@ -58,7 +58,7 @@ Your coach (Coach Andy) can see your training data and messages. Other runners n
 
 7. INTERNATIONAL TRANSFERS
 
-Our database is stored in South Africa. Some providers above (Telegram, AI model providers, Cloudflare, Microsoft) may process data outside South Africa. Where this happens we rely on providers that offer adequate protection as required by section 72 of POPIA (and, where relevant, GDPR safeguards such as standard contractual clauses).
+Our database is stored in South Africa. Some providers above (Telegram, OpenRouter and the providers serving DeepSeek models, Cloudflare, Microsoft) may process data outside South Africa. Where this happens we rely on providers that offer adequate protection as required by section 72 of POPIA (and, where relevant, GDPR safeguards such as standard contractual clauses).
 
 8. HOW LONG WE KEEP IT
 
@@ -70,7 +70,7 @@ Each runner's data is separated and can only be reached through that runner's ow
 
 10. YOUR RIGHTS
 
-You can ask us to show you the data we hold about you, correct it, delete it, or object to or restrict how we use it. You can also ask for a copy of your training data. Message the assistant ("delete my data") or email [PRIVACY EMAIL]. If you are unhappy with how we handle your information, you can complain to the Information Regulator (South Africa): https://inforegulator.org.za.
+You can ask us to show you the data we hold about you, correct it, delete it, or object to or restrict how we use it. You can also ask for a copy of your training data. Message the assistant ("delete my data") or email andrew.hammond1985@gmail.com. If you are unhappy with how we handle your information, you can complain to the Information Regulator (South Africa): https://inforegulator.org.za.
 
 11. CHILDREN
 
@@ -82,4 +82,4 @@ We will post any changes here and update the date above. If a change is signific
 
 13. CONTACT
 
-[LEGAL NAME], [POSTAL ADDRESS], South Africa · [PRIVACY EMAIL]
+Andrew Hammond trading as TR3D Core, 39 Hely Hutchinson, Cape Town, Western Cape, South Africa · andrew.hammond1985@gmail.com
