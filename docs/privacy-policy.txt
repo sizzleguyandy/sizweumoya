@@ -1,0 +1,85 @@
+Privacy Policy
+==============
+
+TR3D Core · Sizwe Umoya running coaching
+Last updated: [DATE]
+
+This policy explains what personal information TR3D Core ("we", "us") collects when you use our running coaching service, including our Telegram assistant "Sarah", how we use it, who we share it with, and the choices you have. We are based in South Africa and process personal information in line with the Protection of Personal Information Act, 2013 (POPIA). Where the EU or UK GDPR applies to you, we also follow it.
+
+1. WHO IS RESPONSIBLE
+
+The responsible party is [LEGAL NAME, e.g. Andrew Hammond trading as TR3D Core], [POSTAL ADDRESS], South Africa. Information Officer: [NAME]. Contact: [PRIVACY EMAIL].
+
+2. WHAT WE COLLECT
+
+- Account details: Name, Telegram user ID and chat ID (Source: You, when you join)
+
+- Training data: Runs and workouts: date, distance, time, pace, heart rate, heart rate zones, elevation, temperature, GPS-derived statistics, strength sets, reps and weights (Source: Files you send us (.fit / .zip), workouts you type, and, if you connect your Garmin account, Garmin Connect)
+
+- Health information: Heart rate data; injuries, niggles, illness or wellbeing you tell us about; body weight if you share it (Source: You and your training data)
+
+- Goals and plans: Races, target times, training plans written by your coach (Source: You and your coach)
+
+- Messages: Your chats with Sarah and the coach, and the reports we send you (Source: You and us)
+
+We do not collect payment card details through this service. The original files you send (which can contain GPS location) are kept on our server so we can re-check your data, and are deleted with the rest of your data. Our reports use summary statistics, not your location.
+
+3. GARMIN DATA
+
+If you choose to connect your Garmin account, Garmin shares the activity and health data you authorise with us through the Garmin Connect Developer Program. We use it only to provide the coaching service to you, as described in this policy. We do not sell Garmin data, use it for advertising, or share it with anyone except the service providers listed in section 6 who help us deliver the service. You can disconnect at any time in Garmin Connect or by asking us; we then stop receiving new data and delete your Garmin data on request.
+
+4. HOW WE USE YOUR INFORMATION
+
+- To give feedback on each run and workout, weekly and monthly reports, fitness trends, training paces and heart rate zones.
+- To flag training load and injury risk, and to alert your coach when something needs a human look.
+- To suggest a taper before a race and, if you have a coaching plan, to compare your training with it.
+- To answer your running questions in chat.
+- To run, secure and improve the service, and to keep backups.
+
+Automated assistant. Sarah is an AI assistant. Your training data and messages are processed by an AI language model to write feedback and replies. Your coach reviews anything health-related and makes all training plan decisions. We do not use your data to train AI models, and we use provider settings that do not allow your data to be used for training.
+
+Not medical advice. The service gives general training feedback, not medical advice. For chest pain, fainting, dizziness or injury, see a doctor or physiotherapist.
+
+5. LEGAL BASIS AND CONSENT
+
+We process your information to provide the service you asked for (performance of our agreement with you) and, for health information such as heart rate and injuries, on the basis of your explicit consent, which we ask for when you join. You can withdraw consent at any time; we will then stop processing and delete your data, which means we can no longer provide the service.
+
+6. WHO WE SHARE IT WITH
+
+We never sell your personal information. We share it only with service providers who process it on our behalf and under our instructions:
+
+- Telegram, to deliver messages and files between you and the assistant.
+- [AI MODEL PROVIDER, e.g. OpenRouter and the model provider it routes to], to generate the assistant's feedback and replies.
+- Cloudflare, for secure network access to our server.
+- Microsoft OneDrive, for backups of our database in a private, access-controlled account.
+- Garmin, only if you connect your Garmin account (data flows from Garmin to us).
+
+Your coach (Coach Andy) can see your training data and messages. Other runners never see your information. We may disclose information if the law requires it.
+
+7. INTERNATIONAL TRANSFERS
+
+Our database is stored in South Africa. Some providers above (Telegram, AI model providers, Cloudflare, Microsoft) may process data outside South Africa. Where this happens we rely on providers that offer adequate protection as required by section 72 of POPIA (and, where relevant, GDPR safeguards such as standard contractual clauses).
+
+8. HOW LONG WE KEEP IT
+
+We keep your data while you use the service. If you leave or ask us to delete it, we delete your account and training data within 30 days, and it drops out of our rolling backups within a further 14 days. We may keep a minimal record that you asked for deletion.
+
+9. SECURITY
+
+Each runner's data is separated and can only be reached through that runner's own authenticated access. Secrets are stored hashed where possible, and access to our server and backups is restricted. No system is perfectly secure; if a breach affects you, we will notify you and the Information Regulator as POPIA requires.
+
+10. YOUR RIGHTS
+
+You can ask us to show you the data we hold about you, correct it, delete it, or object to or restrict how we use it. You can also ask for a copy of your training data. Message the assistant ("delete my data") or email [PRIVACY EMAIL]. If you are unhappy with how we handle your information, you can complain to the Information Regulator (South Africa): https://inforegulator.org.za.
+
+11. CHILDREN
+
+The service is for people aged 18 and over. We do not knowingly collect information from children.
+
+12. CHANGES
+
+We will post any changes here and update the date above. If a change is significant, we will tell you through the assistant.
+
+13. CONTACT
+
+[LEGAL NAME], [POSTAL ADDRESS], South Africa · [PRIVACY EMAIL]
