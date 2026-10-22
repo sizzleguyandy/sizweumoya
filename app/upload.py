@@ -104,7 +104,7 @@ def process_blob(conn, runner, name: str, data: bytes, note: str = "") -> dict:
     if act.kind == "strength":
         res = ingest.store_strength_fit(conn, runner, act, key, note)
         return {"file": name, "status": "stored", "kind": "strength", "date": act.local_date,
-                "sets": res["sets"], "duration_s": int(act.timer_s or act.elapsed_s)}
+                "sets": res["sets"], "duration_s": int(act.timer_s or act.elapsed_s), "plan": res["plan"]}
     return {"file": name, "status": "skipped", "kind": act.sport,
             "reason": "only runs and strength sessions are tracked"}
 

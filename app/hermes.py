@@ -157,10 +157,21 @@ def send_telegram(chat_id: str, text: str) -> None:
         ).raise_for_status()
 
 
-def run_and_deliver(runner, prompt: str, **kwargs) -> str:
-    """Start a turn in the runner's profile, send the reply to their chat, return the text."""
+def run_and_deliver(runner, prompt: str, *, kind: str = "job", **kwargs) -> str:
+    """Start a turn in the runner's profile, send the reply to their chat, save it in their
+    record, return the text."""
     text = start_run(runner["hermes_profile"], runner["hermes_api_key"], prompt, **kwargs)
     send_telegram(runner["telegram_chat_id"], text)
+    if "runner_id" not in runner.keys():
+        return text
+    try:
+        from . import queries, record
+        from .db import session
+        with session() as conn:
+            queries.log_message(conn, runner["runner_id"], "out", kind, text)
+            record.export_runner(conn, runner["runner_id"])
+    except Exception:
+        log.exception("could not save the delivered message for runner %s", runner["runner_id"])
     return text
 
 

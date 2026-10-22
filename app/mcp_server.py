@@ -10,12 +10,13 @@ import hmac
 import logging
 import os
 import threading
+from contextlib import contextmanager
 
 from mcp.server.mcpserver import Context, MCPServer
 
 from datetime import date as _date
 
-from . import hermes, ingest, paces, plans, queries, strength, upload
+from . import hermes, ingest, onboarding, paces, plans, queries, record, strength, upload
 from .config import settings
 from .db import session
 from .identity import AccessDenied, hash_token, resolve_runner
@@ -43,13 +44,27 @@ def _rid(ctx: Context) -> int:
         raise PermissionError(f"access denied: {e}") from None
 
 
+@contextmanager
+def _write(rid: int):
+    """A session for tools that change a runner's data. Afterwards the runner's own record
+    file is rebuilt, so it always holds everything."""
+    with session() as conn:
+        yield conn
+        conn.commit()
+        try:
+            record.export_runner(conn, rid)
+        except Exception:
+            log.exception("record file for runner %s could not be rebuilt", rid)
+
+
 # ---- runner tools ----------------------------------------------------------
 
 @mcp.tool()
 def get_my_profile(ctx: Context) -> dict:
-    """Runner profile: name, HR zones, goal, units, tier, and `coaching` - the mode:
-    "monitor" (option 1, no programme on file) or "guided" (option 2, a run programme from
-    Coach Andy is on file). Read this first; it decides how you work with this runner."""
+    """Profile: name, HR zones, goal, units, tier, and `coaching`: focus (running, strength or
+    hybrid) and, per discipline, "monitor" (they log their own training, you give feedback) or
+    "guided" (a programme from Coach Andy is on file and you take them through it).
+    Read this first; it decides how you work with this person."""
     with session() as conn:
         rid = _rid(ctx)
         return queries.profile(conn, rid) | {"coaching": plans.mode(conn, rid)}
@@ -57,8 +72,9 @@ def get_my_profile(ctx: Context) -> dict:
 
 @mcp.tool()
 def get_my_sessions(ctx: Context) -> dict:
-    """Guided mode only: last, today's and the next three sessions of the run programme, with
-    km, kind, HR range and climb. In monitor mode it returns no sessions."""
+    """Programme sessions around today (last, today, next) for each discipline that has a
+    programme from Coach Andy: runs with km, kind, HR range and climb; strength sessions with
+    their exercises. Returns no sessions for training the person logs themselves."""
     with session() as conn:
         return plans.sessions_around(conn, _rid(ctx))
 
@@ -75,7 +91,7 @@ def submit_activity_file(ctx: Context, file_path: str, note: str = "") -> dict:
         runner = _runner(ctx)
     except AccessDenied as e:
         raise PermissionError(f"access denied: {e}") from None
-    with session() as conn:
+    with _write(runner["runner_id"]) as conn:
         try:
             return upload.process_path(conn, runner, file_path, note)
         except upload.UploadRejected as e:
@@ -92,8 +108,9 @@ def log_workout(ctx: Context, text: str, date: str = "") -> dict:
         _date.fromisoformat(when)
     except ValueError:
         return {"error": "date must be YYYY-MM-DD"}
-    with session() as conn:
-        runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (_rid(ctx),)).fetchone()
+    rid = _rid(ctx)
+    with _write(rid) as conn:
+        runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (rid,)).fetchone()
         return ingest.store_strength_text(conn, runner, text, when)
 
 
@@ -182,8 +199,9 @@ def get_recent_tips(ctx: Context) -> list[dict]:
 @mcp.tool()
 def record_tip(ctx: Context, rule: str, text: str) -> str:
     """Log the one tip you just gave (rule id from the stats, and your wording)."""
-    with session() as conn:
-        queries.record_tip(conn, _rid(ctx), rule, text)
+    rid = _rid(ctx)
+    with _write(rid) as conn:
+        queries.record_tip(conn, rid, rule, text)
     return "ok"
 
 
@@ -196,24 +214,29 @@ def get_notes_and_summary(ctx: Context) -> dict:
 
 @mcp.tool()
 def add_coach_note(ctx: Context, category: str, note: str, review_by: str | None = None) -> int:
-    """Save an observation. category: pattern, preference, health, life, motivation, milestone.
-    For health notes set review_by (YYYY-MM-DD) and also call alert_coach."""
-    with session() as conn:
-        return queries.add_note(conn, _rid(ctx), category, note, review_by=review_by)
+    """Save anything worth remembering about the runner to their record. category: pattern,
+    preference, health, life, motivation, milestone, profile (facts: age, weight, usual run days,
+    work shifts), gear (shoes, watch). For health notes set review_by (YYYY-MM-DD) and also call
+    alert_coach."""
+    rid = _rid(ctx)
+    with _write(rid) as conn:
+        return queries.add_note(conn, rid, category, note, review_by=review_by)
 
 
 @mcp.tool()
 def update_coach_note(ctx: Context, note_id: int, status: str) -> bool:
     """Mark one of this runner's notes resolved or outdated."""
-    with session() as conn:
-        return queries.set_note_status(conn, _rid(ctx), note_id, status)
+    rid = _rid(ctx)
+    with _write(rid) as conn:
+        return queries.set_note_status(conn, rid, note_id, status)
 
 
 @mcp.tool()
 def save_runner_summary(ctx: Context, summary: str) -> str:
     """Replace the short 'who is this runner right now' snapshot (weekly)."""
-    with session() as conn:
-        queries.save_summary(conn, _rid(ctx), summary)
+    rid = _rid(ctx)
+    with _write(rid) as conn:
+        queries.save_summary(conn, rid, summary)
     return "ok"
 
 
@@ -249,8 +272,8 @@ def get_my_races(ctx: Context) -> list[dict]:
 @mcp.tool()
 def propose_plan_change(ctx: Context, reason: str, proposal: str) -> str:
     """Ask the head coach to approve a change. Nothing changes until they decide."""
-    with session() as conn:
-        r = _runner(ctx)
+    r = _runner(ctx)
+    with _write(r["runner_id"]) as conn:
         aid = queries.create_approval(conn, r["runner_id"], reason, proposal)
     hermes.notify_coach(f"Approval needed [{aid}] for {r['name']}\nWhy: {reason}\nProposal: {proposal}")
     return f"Sent to your coach for approval (request {aid})."
@@ -259,12 +282,150 @@ def propose_plan_change(ctx: Context, reason: str, proposal: str) -> str:
 @mcp.tool()
 def alert_coach(ctx: Context, type: str, message: str) -> str:
     """Flag something to the head coach. type: injury, volume_jump, quiet_runner, other."""
-    with session() as conn:
-        r = _runner(ctx)
+    r = _runner(ctx)
+    with _write(r["runner_id"]) as conn:
         aid = queries.create_alert(conn, r["runner_id"], type, message)
     hermes.notify_coach(f"Alert #{aid} ({type}) for {r['name']}: {message}\n"
                         "Reply here and I'll pass your answer on.")
     return "Coach alerted."
+
+
+# ---- the runner's record: save and find anything -----------------------------
+
+@mcp.tool()
+def save_report(ctx: Context, type: str, text: str, basis: dict | None = None) -> str:
+    """Save to the runner's record every debrief, report or answer with numbers you send them.
+    type: debrief, strength_debrief, weekly, monthly, baseline, taper, answer. text: exactly
+    what you sent. basis: what it was based on, e.g. {"run_date": "2026-10-22", "rule": "hr_drift"}."""
+    rid = _rid(ctx)
+    with _write(rid) as conn:
+        saved = queries.log_message(conn, rid, "out", type[:30], text, basis)
+    return "saved" if saved else "already saved"
+
+
+@mcp.tool()
+def get_my_record(ctx: Context, section: str = "summary", since: str = "", until: str = "",
+                  limit: int = 50) -> dict:
+    """Look anything up in the runner's record. section: summary (what's on file), runs,
+    splits (per-km pace and HR), strength (every set), reports (everything sent to them),
+    messages, notes, races, plan, weekly, fitness, tips. since/until: YYYY-MM-DD.
+    Example: a question about Sunday's run -> section="splits", since=until=that date."""
+    with session() as conn:
+        return record.get_record(conn, _rid(ctx), section, since, until, limit)
+
+
+@mcp.tool()
+def request_data_deletion(ctx: Context, reason: str = "") -> str:
+    """The runner asked for all their data to be deleted. Coach Andy is told and completes it
+    (within 30 days, as the privacy policy says). Confirm kindly; don't try to talk them out of it."""
+    r = _runner(ctx)
+    with _write(r["runner_id"]) as conn:
+        aid = queries.create_alert(conn, r["runner_id"], "deletion", f"Asked to delete all data. {reason}"[:500])
+    hermes.notify_coach(f"Alert #{aid} (deletion) for {r['name']}: asked for all their data to be deleted. "
+                        f"Run: python -m app.admin offboard --runner {r['runner_id']}")
+    return "Coach Andy has been asked to delete your data."
+
+
+# ---- onboarding ------------------------------------------------------------
+
+@mcp.tool()
+def get_onboarding_status(ctx: Context) -> dict:
+    """Where this person is in onboarding. `next_step` is what to do next: consent, focus,
+    watch, history, zones, races, health, finish. Steps that don't apply to their focus (watch,
+    zones and races for a lifter) are already marked done. None once onboarded."""
+    with session() as conn:
+        return onboarding.status(conn, _rid(ctx))
+
+
+@mcp.tool()
+def record_consent(ctx: Context, agreed: bool) -> str:
+    """Call only after the runner has clearly said yes to their data being used for coaching
+    (heart rate counts as health data). agreed must be true."""
+    if agreed is not True:
+        return "Not recorded: the runner has to agree first."
+    rid = _rid(ctx)
+    with _write(rid) as conn:
+        return onboarding.record_consent(conn, rid)
+
+
+@mcp.tool()
+def set_my_focus(ctx: Context, focus: str) -> str:
+    """What this person trains, which decides how you coach them: running (runner), strength
+    (lifter: strength guidelines only, no running reports) or hybrid (both). Ask, don't assume.
+    Can be changed later if their training changes."""
+    rid = _rid(ctx)
+    try:
+        with _write(rid) as conn:
+            return "focus set to " + onboarding.set_focus(conn, rid, focus)
+    except ValueError as e:
+        return str(e)
+
+
+@mcp.tool()
+def set_my_watch(ctx: Context, brand: str) -> dict:
+    """Save which watch the runner uses and get the instructions for sending files from it."""
+    rid = _rid(ctx)
+    with _write(rid) as conn:
+        return onboarding.set_watch(conn, rid, brand)
+
+
+@mcp.tool()
+def mark_onboarding_step(ctx: Context, step: str) -> str:
+    """Record an onboarding step that has no data of its own. step: history_fresh (runner has
+    no history to send), no_zones (runner can't find their zones), races_asked (asked about
+    races; save any with save_race first), health_asked (asked about injuries; save any as a
+    health note and alert_coach first)."""
+    notes = {"history_fresh": "history: starting fresh", "no_zones": "zones: none available",
+             "races_asked": "races asked", "health_asked": "health asked"}
+    if step not in notes:
+        return f"step must be one of {sorted(notes)}"
+    rid = _rid(ctx)
+    with _write(rid) as conn:
+        onboarding.mark(conn, rid, notes[step])
+    return "ok"
+
+
+@mcp.tool()
+def save_race(ctx: Context, name: str, date: str, distance_km: float, note: str = "") -> dict:
+    """Save a race the runner has entered or plans to run. date YYYY-MM-DD."""
+    rid = _rid(ctx)
+    try:
+        with _write(rid) as conn:
+            return onboarding.save_race(conn, rid, name, date, distance_km, note)
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def propose_my_zones(ctx: Context, zone_tops: list[int], max_hr: int | None = None,
+                     source: str = "screenshot of the runner's watch zones") -> str:
+    """Heart rate zones the runner showed you (e.g. a screenshot of their watch app).
+    zone_tops: the top of zones 1-4 in bpm, e.g. [132, 144, 152, 162]. Coach Andy approves
+    before they are used; tell the runner that."""
+    r = _runner(ctx)
+    try:
+        with _write(r["runner_id"]) as conn:
+            aid = onboarding.propose_zones(conn, r["runner_id"], zone_tops, max_hr, source)
+    except ValueError as e:
+        return f"Not sent: {e}"
+    hermes.notify_coach(f"Approval needed [{aid}] for {r['name']}: heart rate zones {zone_tops}"
+                        + (f", max HR {max_hr}" if max_hr else "") + f" (from {source}). "
+                        f"Reply approve {aid} or reject {aid}.")
+    return f"Sent to Coach Andy for approval (request {aid})."
+
+
+@mcp.tool()
+def finish_onboarding(ctx: Context) -> dict:
+    """Last step: marks the runner as live and sends Coach Andy the new-runner summary.
+    Needs consent. Returns anything that was skipped."""
+    r = _runner(ctx)
+    try:
+        with _write(r["runner_id"]) as conn:
+            res = onboarding.finish(conn, r["runner_id"])
+    except ValueError as e:
+        return {"error": str(e)}
+    hermes.notify_coach("New runner: " + res["coach_summary"])
+    return {"onboarded": True, "skipped": res["missing"]}
 
 
 # ---- coach tools (coach profile only) -------------------------------------
@@ -344,6 +505,9 @@ def coach_decide(ctx: Context, approval_id: str, decision: str, note: str = "") 
             return f"Recorded: {decision}. Runner row is gone; nothing to notify."
         runner = dict(found)  # detach: the connection closes with this block
         proposal = row["proposal"]
+        if decision == "approved":
+            onboarding.apply_zones(conn, row)
+        record.export_runner(conn, runner["runner_id"])
     _deliver_decision(runner, decision, proposal, note)
     return f"Recorded: {decision}. Runner notified."
 
@@ -379,6 +543,7 @@ def coach_reply(ctx: Context, message: str, alert_id: int = 0) -> str:
         conn.execute("UPDATE coach_alerts SET handled=1 WHERE id=?", (row["id"],))
         conn.commit()
         queries.log_message(conn, runner["runner_id"], "out", "coach_reply", message[:2000])
+        record.export_runner(conn, runner["runner_id"])
         about = row["message"]
     prompt = (
         f"Coach Andy has answered something you raised ({about}). Coach Andy's answer: \"{message}\". "

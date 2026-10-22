@@ -104,43 +104,80 @@ def _active(conn, rid: int, type_: str, today: date):
         (rid, type_, today.isoformat())).fetchone()
 
 
+FOCUSES = ("running", "strength", "hybrid")
+
+
 def mode(conn, rid: int, today: date | None = None) -> dict:
-    """Which option applies, decided only by what is on file. No programme means option 1."""
+    """How Sarah works with this person, decided only by what is on file.
+
+    focus: running, strength or hybrid (both). For each discipline: "guided" when a programme
+    from Coach Andy is on file and still running, otherwise "monitor" (they log their own
+    training and get feedback). `mode` is the running one, kept for older callers.
+    """
     today = today or date.today()
+    r = conn.execute("SELECT focus FROM runners WHERE runner_id=?", (rid,)).fetchone()
+    focus = (r["focus"] if r and r["focus"] in FOCUSES else "running")
     run = _active(conn, rid, "run", today)
     strength = _active(conn, rid, "strength", today)
-    out = {"mode": "guided" if run else "monitor",
-           "run_programme": None, "strength_programme": bool(strength)}
-    if run:
-        out["run_programme"] = {"start": run["start_date"], "end": run["end_date"],
-                                "weeks_left": max(0, -(-(date.fromisoformat(run["end_date"]) - today).days // 7))
-                                if run["end_date"] else None}
-    return out
+
+    def prog(p):
+        if not p:
+            return None
+        return {"start": p["start_date"], "end": p["end_date"],
+                "weeks_left": max(0, -(-(date.fromisoformat(p["end_date"]) - today).days // 7))
+                if p["end_date"] else None}
+
+    return {"focus": focus,
+            "mode": "guided" if run else "monitor",
+            "running": "guided" if run else "monitor",
+            "strength": "guided" if strength else "monitor",
+            "run_programme": prog(run), "strength_programme": prog(strength)}
 
 
 def sessions_around(conn, rid: int, today: date | None = None) -> dict:
-    """Guided mode: the last session, today's, and the next few, from the active run programme."""
+    """Programme sessions around today (last, today, next three) for each discipline that
+    has a programme on file. Nothing for a discipline the person logs themselves."""
     today = today or date.today()
     m = mode(conn, rid, today)
-    if m["mode"] != "guided":
+    if m["running"] != "guided" and m["strength"] != "guided":
         return {"mode": "monitor", "sessions": []}
 
     def pick(sql, args):
         out = []
         for w in conn.execute(sql, args).fetchall():
             t = _target(w)
-            out.append({"date": w["date"], "description": w["description"], "status": w["status"],
-                        **{k: t[k] for k in ("kind", "km", "hr_range", "climb_m", "week", "phase") if k in t}})
+            out.append({"date": w["date"], "type": w["ptype"], "description": w["description"],
+                        "status": w["status"],
+                        **{k: t[k] for k in ("kind", "km", "hr_range", "climb_m", "week", "phase", "exercises")
+                           if k in t}})
         return out
 
-    base = ("SELECT w.* FROM planned_workouts w JOIN plans p ON p.id=w.plan_id WHERE w.runner_id=?"
-            " AND p.active=1 AND p.type='run' AND ")
+    base = ("SELECT w.*, p.type ptype FROM planned_workouts w JOIN plans p ON p.id=w.plan_id"
+            " WHERE w.runner_id=? AND p.active=1 AND ")
+    d = today.isoformat()
     return {
-        "mode": "guided",
-        "last": pick(base + "w.date<? ORDER BY w.date DESC LIMIT 1", (rid, today.isoformat())),
-        "today": pick(base + "w.date=?", (rid, today.isoformat())),
-        "next": pick(base + "w.date>? ORDER BY w.date LIMIT 3", (rid, today.isoformat())),
+        "mode": "guided", "running": m["running"], "strength": m["strength"],
+        "last": pick(base + "w.date<? ORDER BY w.date DESC LIMIT 2", (rid, d)),
+        "today": pick(base + "w.date=?", (rid, d)),
+        "next": pick(base + "w.date>? ORDER BY w.date LIMIT 4", (rid, d)),
     }
+
+
+def match_strength(conn, rid: int, session_date: str, activity_key: str) -> dict | None:
+    """Link a logged strength session to the nearest open session of a strength programme."""
+    d = date.fromisoformat(session_date)
+    w = conn.execute(
+        "SELECT w.* FROM planned_workouts w JOIN plans p ON p.id=w.plan_id WHERE w.runner_id=?"
+        " AND p.active=1 AND p.type='strength' AND w.status IN ('planned','missed') AND w.date BETWEEN ? AND ?"
+        " ORDER BY abs(julianday(w.date)-julianday(?)), w.date LIMIT 1",
+        (rid, (d - timedelta(days=MATCH_DAYS)).isoformat(), (d + timedelta(days=MATCH_DAYS)).isoformat(),
+         session_date)).fetchone()
+    if not w:
+        return None
+    conn.execute("UPDATE planned_workouts SET status='done', completed_activity_key=? WHERE id=?",
+                 (activity_key, w["id"]))
+    conn.commit()
+    return {"planned_date": w["date"], "description": w["description"], **_target(w)}
 
 
 def tomorrow_session(conn, rid: int, today: date | None = None) -> list:
@@ -150,8 +187,19 @@ def tomorrow_session(conn, rid: int, today: date | None = None) -> list:
     return [w for w in s.get("next", []) if w["date"] == tomorrow]
 
 
+def strength_vs_programme(conn, rid: int, start: date, end: date) -> dict:
+    """Strength programme sessions in the period: planned, done, missed, still to come."""
+    ws = conn.execute(
+        "SELECT w.* FROM planned_workouts w JOIN plans p ON p.id=w.plan_id WHERE w.runner_id=?"
+        " AND p.active=1 AND p.type='strength' AND w.date>=? AND w.date<? ORDER BY w.date",
+        (rid, start.isoformat(), end.isoformat())).fetchall()
+    return {"sessions_planned": len(ws), "done": sum(1 for w in ws if w["status"] == "done"),
+            "missed": [f"{w['date']} {w['description'][:40]}" for w in ws if w["status"] == "missed"],
+            "still_to_come": [f"{w['date']} {w['description'][:40]}" for w in ws if w["status"] == "planned"]}
+
+
 def week_vs_programme(conn, rid: int, start: date, end: date, actual: dict) -> dict:
-    """Guided mode: this week's programme against what was done."""
+    """Guided mode: this week's run programme against what was done."""
     ws = conn.execute(
         "SELECT w.* FROM planned_workouts w JOIN plans p ON p.id=w.plan_id WHERE w.runner_id=?"
         " AND p.active=1 AND p.type='run' AND w.date>=? AND w.date<? ORDER BY w.date",

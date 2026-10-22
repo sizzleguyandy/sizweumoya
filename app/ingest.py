@@ -85,7 +85,14 @@ def store_run(conn, runner, act: FitActivity, key: str, note: str = "") -> dict:
         run_type, zone_s, row["elevation_m"], dist_km, temp))
     replaced = _replace_sheet_row(conn, row)
     cols = ", ".join(row)
-    conn.execute(f"INSERT INTO runs ({cols}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
+    run_id = conn.execute(f"INSERT INTO runs ({cols}) VALUES ({', '.join('?' * len(row))})",
+                          list(row.values())).lastrowid
+    splits = stats.km_splits(t, v, hr) if v else []
+    conn.executemany(
+        "INSERT INTO run_splits (run_id, runner_id, km, distance_m, duration_s, pace_s_km, avg_hr, max_hr)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        [(run_id, runner["runner_id"], s["km"], s["distance_m"], s["duration_s"], s["pace_s_km"],
+          s["avg_hr"], s["max_hr"]) for s in splits])
     conn.commit()
     row["replaced_sheet_row"] = replaced
     row["plan"] = plans.match_run(conn, runner, row)
@@ -126,7 +133,8 @@ def store_strength_fit(conn, runner, act: FitActivity, key: str, note: str = "")
     )
     _store_sets(conn, runner, cur.lastrowid, act.sets)
     conn.commit()
-    return {"session_id": cur.lastrowid, "sets": len(act.sets)}
+    plan = plans.match_strength(conn, runner["runner_id"], act.local_date, key)
+    return {"session_id": cur.lastrowid, "sets": len(act.sets), "plan": plan}
 
 
 def store_strength_text(conn, runner, text: str, date: str) -> dict:
@@ -143,4 +151,6 @@ def store_strength_text(conn, runner, text: str, date: str) -> dict:
     )
     _store_sets(conn, runner, cur.lastrowid, sets)
     conn.commit()
-    return {"duplicate": False, "session_id": cur.lastrowid, "sets": len(sets), "unparsed": unparsed}
+    plan = plans.match_strength(conn, runner["runner_id"], date, key)
+    return {"duplicate": False, "session_id": cur.lastrowid, "sets": len(sets), "unparsed": unparsed,
+            "plan": plan}

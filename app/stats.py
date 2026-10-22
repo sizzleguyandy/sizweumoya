@@ -170,3 +170,28 @@ def format_pace(s_per_km: float | None) -> str:
         return "-"
     m, s = divmod(int(round(s_per_km)), 60)
     return f"{m}:{s:02d}/km"
+
+
+def km_splits(time_s: list[float], speed: list[float], hr: list[float]) -> list[dict]:
+    """Per-km splits from per-second streams: distance comes from integrating speed."""
+    if len(time_s) < 2 or len(speed) != len(time_s):
+        return []
+    out, dist, start_t, start_i, km = [], 0.0, time_s[0], 0, 1
+
+    def close(end_i, end_t, d):
+        hrs = [h for h in hr[start_i:end_i + 1] if h] if hr else []
+        dur = end_t - start_t
+        out.append({"km": km, "distance_m": round(d, 1), "duration_s": round(dur, 1),
+                    "pace_s_km": round(dur / (d / 1000), 1) if d > 0 else None,
+                    "avg_hr": round(sum(hrs) / len(hrs), 1) if hrs else None,
+                    "max_hr": max(hrs) if hrs else None})
+
+    for i in range(1, len(time_s)):
+        dist += (speed[i - 1] or 0) * (time_s[i] - time_s[i - 1])
+        if dist >= km * 1000:
+            close(i, time_s[i], 1000.0)
+            start_t, start_i, km = time_s[i], i, km + 1
+    rest = dist - (km - 1) * 1000
+    if rest >= 50:  # a tail shorter than 50 m is noise
+        close(len(time_s) - 1, time_s[-1], rest)
+    return out

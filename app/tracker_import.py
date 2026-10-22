@@ -14,7 +14,7 @@ import openpyxl
 from . import plans
 
 # Tables holding a runner's data, cleared by reset_runner (the runner row itself stays).
-RUNNER_TABLES = ("strength_sets", "strength_sessions", "runs", "weekly_summary", "fitness_checks",
+RUNNER_TABLES = ("strength_sets", "strength_sessions", "run_splits", "runs", "weekly_summary", "fitness_checks",
                  "messages", "tips_given", "coach_notes", "runner_summary", "approvals",
                  "planned_workouts", "plans", "coach_alerts", "races")
 

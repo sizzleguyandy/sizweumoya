@@ -13,6 +13,10 @@ CREATE TABLE IF NOT EXISTS runners (
     hr_zones          TEXT,                   -- JSON list of 4 upper bounds: Z1..Z4 (Z5 above)
     zones_locked      INTEGER NOT NULL DEFAULT 0, -- 1 = set by Coach Andy; never auto-updated
     easy_hr_cap       INTEGER,                -- coach-set ceiling for easy and long runs
+    focus             TEXT NOT NULL DEFAULT 'running', -- running / strength / hybrid
+    watch             TEXT,                   -- brand the runner uses (garmin, coros, ...)
+    consent_at        TEXT,                   -- when the runner agreed to the privacy terms
+    onboarded_at      TEXT,                   -- when onboarding finished
     weight_kg         REAL,
     goal              TEXT,
     units             TEXT NOT NULL DEFAULT 'km',
@@ -40,6 +44,19 @@ CREATE TABLE IF NOT EXISTS runs (
     hr_drift_pct    REAL,
     run_type        TEXT,                     -- easy / long / workout / race
     is_easy_valid   INTEGER NOT NULL DEFAULT 0
+);
+
+-- Per-km splits from the file's per-second streams.
+CREATE TABLE IF NOT EXISTS run_splits (
+    id          INTEGER PRIMARY KEY,
+    run_id      INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    runner_id   INTEGER NOT NULL REFERENCES runners(runner_id) ON DELETE CASCADE,
+    km          INTEGER NOT NULL,             -- 1, 2, ... (last one may be partial)
+    distance_m  REAL NOT NULL,
+    duration_s  REAL NOT NULL,
+    pace_s_km   REAL,
+    avg_hr      REAL,
+    max_hr      REAL
 );
 
 CREATE TABLE IF NOT EXISTS strength_sessions (
@@ -95,8 +112,9 @@ CREATE TABLE IF NOT EXISTS messages (
     runner_id   INTEGER NOT NULL REFERENCES runners(runner_id) ON DELETE CASCADE,
     date        TEXT NOT NULL DEFAULT (datetime('now')),
     direction   TEXT NOT NULL,                -- out / in
-    type        TEXT,                         -- debrief / weekly / fitness / chat
-    text        TEXT NOT NULL
+    type        TEXT,                         -- debrief / weekly / monthly / fitness / coach_reply / ...
+    text        TEXT NOT NULL,
+    basis       TEXT                          -- JSON: what the report was based on
 );
 
 CREATE TABLE IF NOT EXISTS tips_given (
@@ -164,6 +182,8 @@ CREATE TABLE IF NOT EXISTS approvals (
     created     TEXT NOT NULL DEFAULT (datetime('now')),
     reason      TEXT NOT NULL,
     proposal    TEXT NOT NULL,
+    kind        TEXT NOT NULL DEFAULT 'plan', -- plan / zones
+    payload     TEXT,                         -- JSON for kinds the system applies (zones)
     status      TEXT NOT NULL DEFAULT 'pending', -- pending/approved/rejected/edited
     coach_note  TEXT,
     decided_at  TEXT
@@ -179,5 +199,7 @@ CREATE TABLE IF NOT EXISTS coach_alerts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_runs_runner_date ON runs(runner_id, date);
+CREATE INDEX IF NOT EXISTS idx_splits_run ON run_splits(run_id);
+CREATE INDEX IF NOT EXISTS idx_messages_runner ON messages(runner_id, date);
 CREATE INDEX IF NOT EXISTS idx_sets_runner_ex ON strength_sets(runner_id, exercise);
 CREATE INDEX IF NOT EXISTS idx_notes_runner ON coach_notes(runner_id, status);

@@ -7,12 +7,17 @@
   python -m app.admin delete-runner --runner 1
   python -m app.admin reset-runner --runner 1 --name Andy --tier full
   python -m app.admin set-zones --runner 1 --zones 132,144,152,162 [--max-hr 184] [--easy-cap 138]
+  python -m app.admin onboard --name Tom --chat-id 123456789 [--focus running|strength|hybrid]
+  python -m app.admin welcome --runner 2
+  python -m app.admin load-programme --runner 2 --file programme.csv [--replace]
+  python -m app.admin export-record --runner 2 [--to path.db]
+  python -m app.admin offboard --runner 2 [--keep-copy path.db]
   python -m app.admin import-tracker --runner 1 --file tracker.xlsx [--replace]
 """
 import argparse
 import json
 
-from . import stats, tracker_import
+from . import hermes, programme, record, stats, tracker_import
 from .config import settings
 from .db import connect, init_db
 from .identity import hash_token, new_token
@@ -37,11 +42,25 @@ def main() -> None:
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init")
-    a = sub.add_parser("add-runner")
-    a.add_argument("--name", required=True)
-    a.add_argument("--chat-id", required=True)
-    a.add_argument("--max-hr", type=int)
-    a.add_argument("--goal")
+    for name in ("add-runner", "onboard"):
+        a = sub.add_parser(name)
+        a.add_argument("--name", required=True)
+        a.add_argument("--chat-id", required=True)
+        a.add_argument("--max-hr", type=int)
+        a.add_argument("--goal")
+        a.add_argument("--focus", choices=["running", "strength", "hybrid"])
+    w = sub.add_parser("welcome", help="Sarah sends the welcome and starts onboarding")
+    w.add_argument("--runner", type=int, required=True)
+    lp = sub.add_parser("load-programme", help="load a run and/or strength programme from a CSV")
+    lp.add_argument("--runner", type=int, required=True)
+    lp.add_argument("--file", required=True)
+    lp.add_argument("--replace", action="store_true", help="end the current programme of the same type first")
+    ex = sub.add_parser("export-record")
+    ex.add_argument("--runner", type=int, required=True)
+    ex.add_argument("--to")
+    o = sub.add_parser("offboard", help="delete a runner and everything held for them")
+    o.add_argument("--runner", type=int, required=True)
+    o.add_argument("--keep-copy", help="save a final copy of their record here first (e.g. if they asked for it)")
     k = sub.add_parser("set-hermes-key")
     k.add_argument("--runner", type=int, required=True)
     k.add_argument("--key", required=True)
@@ -67,8 +86,13 @@ def main() -> None:
     init_db(conn)
     if args.cmd == "init":
         print(f"Initialised {settings.db_path}")
-    elif args.cmd == "add-runner":
+    elif args.cmd in ("add-runner", "onboard"):
         rid, profile, token = add_runner(conn, args.name, args.chat_id, args.max_hr, args.goal)
+        if args.focus:
+            conn.execute("UPDATE runners SET focus=? WHERE runner_id=?", (args.focus, rid))
+            conn.commit()
+        path = record.export_runner(conn, rid)
+        print(f"Record file: {path}")
         print(f"runner_id: {rid}\nprofile:   {profile}\n")
         print("1) Create the Hermes profile:  hermes profile create", profile)
         print("2) In the DEFAULT profile's config.yaml, add the route under gateway.profile_routes:")
@@ -87,7 +111,8 @@ def main() -> None:
          identity_header: {{name: {settings.mcp_profile_header}, value_from: profile}}""")
         print("4) Set that profile's API_SERVER_KEY, then: python -m app.admin set-hermes-key "
               f"--runner {rid} --key <key>")
-        print("5) Ask the runner to send their last 6-8 weeks of runs as .fit files (or a zip) to the bot.")
+        print("5) Restart the gateway, then add the chat ID to TELEGRAM_ALLOWED_USERS and restart again.")
+        print(f"6) python -m app.admin welcome --runner {rid}   (Sarah introduces herself and starts onboarding)")
         print("\nThe MCP token is shown once. Only its hash is stored.")
     elif args.cmd == "set-hermes-key":
         conn.execute("UPDATE runners SET hermes_api_key=? WHERE runner_id=?", (args.key, args.runner))
@@ -134,6 +159,37 @@ def main() -> None:
             tracker_import.reset_runner(conn, args.runner)
             runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (args.runner,)).fetchone()
         print(json.dumps(tracker_import.import_workbook(conn, runner, args.file), indent=2))
+
+    elif args.cmd == "welcome":
+        runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (args.runner,)).fetchone()
+        if runner is None or not runner["hermes_api_key"]:
+            raise SystemExit("unknown runner, or set-hermes-key has not been run yet")
+        text = hermes.run_and_deliver(runner, WELCOME_PROMPT, kind="welcome")
+        print("Welcome sent:\n" + text)
+    elif args.cmd == "load-programme":
+        print(json.dumps(programme.load_csv(conn, args.runner, args.file, replace=args.replace), indent=2))
+        record.export_runner(conn, args.runner)
+    elif args.cmd == "export-record":
+        print(record.export_runner(conn, args.runner, args.to))
+    elif args.cmd == "offboard":
+        runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (args.runner,)).fetchone()
+        if runner is None:
+            raise SystemExit("no such runner")
+        if args.keep_copy:
+            print("Final copy:", record.export_runner(conn, args.runner, args.keep_copy))
+        conn.execute("DELETE FROM runners WHERE runner_id=?", (args.runner,))
+        conn.commit()
+        record.delete_file(runner["hermes_profile"])
+        print(f"Deleted {runner['name']} and everything held for them (record file included).")
+        print(f"Now remove the Hermes profile {runner['hermes_profile']}, its route, and the chat ID from "
+              "TELEGRAM_ALLOWED_USERS, then restart the gateway. Backups age out within 14 days.")
+
+
+WELCOME_PROMPT = (
+    "A new person has just been set up. Send your welcome and start onboarding: call "
+    "get_onboarding_status, introduce yourself as Sarah, Coach Andy's assistant, say in two or three "
+    "sentences what you do, and ask for their consent as the onboarding section of your instructions "
+    "describes. Ask only that one question in this message.")
 
 
 if __name__ == "__main__":

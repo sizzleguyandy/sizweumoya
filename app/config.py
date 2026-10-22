@@ -10,6 +10,8 @@ def _env(name: str, default: str = "") -> str:
 @dataclass(frozen=True)
 class Settings:
     db_path: str = field(default_factory=lambda: _env("RAC_DB_PATH", "data/runners.db"))
+    # One complete .db file per runner (a copy of everything held for them), kept in sync.
+    records_dir: str = field(default_factory=lambda: _env("RAC_RECORDS_DIR", "data/runners"))
 
     hermes_base_url: str = field(default_factory=lambda: _env("HERMES_BASE_URL", "http://localhost:8642"))
     telegram_bot_token: str = field(default_factory=lambda: _env("TELEGRAM_BOT_TOKEN"))

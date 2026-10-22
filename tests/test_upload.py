@@ -336,7 +336,9 @@ def test_mode_follows_what_is_on_file(env):
     conn, runner, _, _ = env
     rid = runner["runner_id"]
     today = date(2026, 10, 22)
-    assert plans.mode(conn, rid, today) == {"mode": "monitor", "run_programme": None, "strength_programme": False}
+    assert plans.mode(conn, rid, today) == {"focus": "running", "mode": "monitor", "running": "monitor",
+                                            "strength": "monitor", "run_programme": None,
+                                            "strength_programme": None}
     assert plans.sessions_around(conn, rid, today) == {"mode": "monitor", "sessions": []}
     pid = conn.execute("INSERT INTO plans (runner_id, type, start_date, end_date) VALUES (?,?,?,?)",
                        (rid, "run", "2026-08-31", "2026-11-15")).lastrowid

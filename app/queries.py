@@ -5,9 +5,10 @@ from datetime import date, timedelta
 import json
 
 from . import paces, plans, stats
+from . import strength as strength_mod
 from .db import rows
 
-NOTE_CATEGORIES = {"pattern", "preference", "health", "life", "motivation", "milestone"}
+NOTE_CATEGORIES = {"pattern", "preference", "health", "life", "motivation", "milestone", "profile", "gear"}
 
 
 def profile(conn, rid: int) -> dict:
@@ -94,9 +95,15 @@ def week_summary(conn, rid: int, start: date | None = None) -> dict:
         "tips": stats.week_tips(km, last_km, easy, days_since),
     }
     result.update(_week_detail(conn, rid, start, end))
-    result["coaching_mode"] = plans.mode(conn, rid, end - timedelta(days=1))["mode"]
-    if result["coaching_mode"] == "guided":
+    m = plans.mode(conn, rid, min(end - timedelta(days=1), date.today()))
+    result["focus"] = m["focus"]
+    result["coaching_mode"] = m["mode"]
+    if m["running"] == "guided":
         result["vs_programme"] = plans.week_vs_programme(conn, rid, start, end, result)
+    if m["focus"] in ("strength", "hybrid") or m["strength"] == "guided":
+        result["strength_review"] = strength_mod.review(conn, rid, end - timedelta(days=1))
+    if m["strength"] == "guided":
+        result["strength_vs_programme"] = plans.strength_vs_programme(conn, rid, start, end)
     conn.execute(
         "INSERT INTO weekly_summary (runner_id, week_start, total_km, runs, strength_sessions, easy_pct, km_change_pct)"
         " VALUES (?,?,?,?,?,?,?) ON CONFLICT(runner_id, week_start) DO UPDATE SET total_km=excluded.total_km,"
@@ -142,10 +149,15 @@ def month_summary(conn, rid: int, year: int, month: int) -> dict:
         "strength": strength,
         "fitness": fit,
         "progress_status": PROGRESS.get(fit["verdict"], "grey"),
-        "coaching_mode": plans.mode(conn, rid, end - timedelta(days=1))["mode"],
     }
-    if out["coaching_mode"] == "guided":
+    m = plans.mode(conn, rid, min(end - timedelta(days=1), date.today()))
+    out["focus"], out["coaching_mode"] = m["focus"], m["mode"]
+    if m["running"] == "guided":
         out["vs_programme"] = plans.week_vs_programme(conn, rid, start, end, out)
+    if m["focus"] in ("strength", "hybrid"):
+        out["lifts"] = strength_mod.lift_progress(conn, rid, start.isoformat())
+    if m["strength"] == "guided":
+        out["strength_vs_programme"] = plans.strength_vs_programme(conn, rid, start, end)
     return out
 
 
@@ -314,7 +326,16 @@ def decide_approval(conn, approval_id: str, decision: str, note: str | None = No
     return dict(row) | {"status": decision, "coach_note": note}
 
 
-def log_message(conn, rid: int, direction: str, type_: str, text: str) -> None:
-    conn.execute("INSERT INTO messages (runner_id, direction, type, text) VALUES (?,?,?,?)",
-                 (rid, direction, type_, text))
+def log_message(conn, rid: int, direction: str, type_: str, text: str, basis: dict | None = None) -> bool:
+    """Save a message or report. The same outgoing text within the last hour is saved once
+    (a scheduled job and Sarah may both record the same report). Returns True if saved."""
+    text = (text or "").strip()
+    if not text:
+        return False
+    if conn.execute("SELECT 1 FROM messages WHERE runner_id=? AND direction=? AND text=?"
+                    " AND date>=datetime('now','-1 hour')", (rid, direction, text)).fetchone():
+        return False
+    conn.execute("INSERT INTO messages (runner_id, direction, type, text, basis) VALUES (?,?,?,?,?)",
+                 (rid, direction, type_, text[:8000], json.dumps(basis) if basis else None))
     conn.commit()
+    return True
