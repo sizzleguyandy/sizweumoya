@@ -155,7 +155,7 @@ def _schema_without_fk() -> str:
     text = SCHEMA.read_text().partition("CREATE INDEX")[0]
     # Secrets are left out of the copy, so their columns must accept NULL there, and tables
     # that only hold connection secrets are not created at all.
-    text = re.sub(r"(--[^\n]*\n)*CREATE TABLE IF NOT EXISTS hevy_links \(.*?\);\n", "", text, flags=re.S)
+    text = re.sub(r"(--[^\n]*\n)*CREATE TABLE IF NOT EXISTS (hevy|garmin)_links \(.*?\);\n", "", text, flags=re.S)
     return text.replace("mcp_token_hash    TEXT NOT NULL", "mcp_token_hash    TEXT")
 
 

@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS runs (
     name            TEXT,
     note            TEXT,                     -- runner's caption
     treadmill       INTEGER NOT NULL DEFAULT 0,
+    device          TEXT,                     -- e.g. "Forerunner 255" (Garmin attribution)
     distance_km     REAL,
     duration_s      INTEGER,
     avg_pace_s_km   REAL,
@@ -63,7 +64,8 @@ CREATE TABLE IF NOT EXISTS strength_sessions (
     id              INTEGER PRIMARY KEY,
     runner_id       INTEGER NOT NULL REFERENCES runners(runner_id) ON DELETE CASCADE,
     activity_key    TEXT NOT NULL UNIQUE,     -- 'fit:<sha256>' or 'text:<sha256>'
-    source          TEXT NOT NULL DEFAULT 'fit', -- fit / text
+    source          TEXT NOT NULL DEFAULT 'fit', -- fit / text / hevy / garmin
+    device          TEXT,
     date            TEXT NOT NULL,
     title           TEXT,
     note            TEXT,
@@ -179,6 +181,14 @@ CREATE TABLE IF NOT EXISTS races (
 
 -- Hevy connection per person: their own API key and the secret Hevy sends with each webhook.
 -- Never copied into the personal record file.
+-- Garmin Connect link per person (the Garmin userId that push notifications carry).
+CREATE TABLE IF NOT EXISTS garmin_links (
+    runner_id       INTEGER PRIMARY KEY REFERENCES runners(runner_id) ON DELETE CASCADE,
+    garmin_user_id  TEXT NOT NULL UNIQUE,
+    connected_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    permissions     TEXT                           -- JSON list from Garmin's permission notices
+);
+
 CREATE TABLE IF NOT EXISTS hevy_links (
     runner_id      INTEGER PRIMARY KEY REFERENCES runners(runner_id) ON DELETE CASCADE,
     api_key        TEXT NOT NULL,

@@ -22,6 +22,13 @@ class Settings:
 
     # Where Hermes saves files a runner sends to the bot. {profile} is the authenticated
     # profile name, so each runner can only submit files from their own folder.
+    # Garmin Connect Developer Program (Starter: push only). The client ID is checked on every
+    # push; the secret stays in .env for the OAuth step and is never logged.
+    garmin_client_id: str = field(default_factory=lambda: _env("GARMIN_CLIENT_ID"))
+    # Until Garmin confirms in writing that AI feedback is allowed (agreement 15.11), activities
+    # from Garmin are stored but Sarah is not asked to comment on them automatically.
+    garmin_ai_allowed: bool = field(default_factory=lambda: _env("GARMIN_AI_ALLOWED", "0") == "1")
+
     hevy_base_url: str = field(default_factory=lambda: _env("HEVY_BASE_URL", "https://api.hevyapp.com"))
 
     hermes_home: str = field(default_factory=lambda: _env("HERMES_HOME", ""))

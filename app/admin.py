@@ -14,6 +14,7 @@
   python -m app.admin load-programme --runner 2 --file programme.csv [--replace]
   python -m app.admin export-record --runner 2 [--to path.db]
   python -m app.admin offboard --runner 2 [--keep-copy path.db]
+  python -m app.admin garmin-link --runner 1 --user-id <Garmin userId>
   HEVY_API_KEY=... python -m app.admin hevy-connect --runner 1
   python -m app.admin hevy-import --runner 1 --since 2026-08-01
   python -m app.admin import-tracker --runner 1 --file tracker.xlsx [--replace]
@@ -21,7 +22,7 @@
 import argparse
 import json
 
-from . import hermes, hevy, keyboard, onboarding, programme, record, stats, tracker_import
+from . import garmin, hermes, hevy, keyboard, onboarding, programme, record, stats, tracker_import
 from .config import settings
 from .db import connect, init_db
 from .identity import hash_token, new_token
@@ -85,6 +86,10 @@ def main() -> None:
     z.add_argument("--zones", required=True, help="upper bounds of Z1-Z4, e.g. 132,144,152,162")
     z.add_argument("--max-hr", type=int)
     z.add_argument("--easy-cap", type=int)
+    gl = sub.add_parser("garmin-link", help="link a person to their Garmin userId (for testing with the "
+                                            "User Authorization tool, before the OAuth flow exists)")
+    gl.add_argument("--runner", type=int, required=True)
+    gl.add_argument("--user-id", required=True)
     hc = sub.add_parser("hevy-connect", help="link a person's Hevy account (key read from HEVY_API_KEY)")
     hc.add_argument("--runner", type=int, required=True)
     hc.add_argument("--public-url", default="https://coach.sizweumoya.com")
@@ -164,6 +169,9 @@ def main() -> None:
         print(dict(conn.execute("SELECT name, hr_zones, max_hr, easy_hr_cap, zones_locked FROM runners"
                                 " WHERE runner_id=?", (args.runner,)).fetchone()))
         print("Applies to runs stored from now on. Runs already stored keep their zone times.")
+    elif args.cmd == "garmin-link":
+        garmin.link(conn, args.runner, args.user_id)
+        print(f"Runner {args.runner} linked to Garmin user {args.user_id}.")
     elif args.cmd == "hevy-connect":
         import os
         key = os.environ.get("HEVY_API_KEY", "")

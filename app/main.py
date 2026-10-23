@@ -12,7 +12,8 @@ from datetime import date
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
-from . import hermes, hevy, plans, queries, record, trends
+from . import garmin, hermes, hevy, plans, queries, record, trends
+from .config import settings
 from .db import connect, init_db, session
 
 logging.basicConfig(level=logging.INFO)
@@ -27,6 +28,79 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="Runner Assistant Coach data service", lifespan=lifespan)
+
+
+# ---- Garmin push endpoints (public through the tunnel: /garmin/* only) ----------
+# Garmin needs 200 within 30 s, so each handler only checks the sender and queues the work.
+
+async def _garmin_body(request: Request) -> dict:
+    if not garmin.client_ok(request.headers):
+        raise HTTPException(401)
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400) from None
+    if not isinstance(body, dict):
+        raise HTTPException(400)
+    return body
+
+
+@app.post("/garmin/activity-files")
+async def garmin_activity_files(request: Request, tasks: BackgroundTasks):
+    body = await _garmin_body(request)
+    items = [i for i in body.get("activityFiles") or [] if isinstance(i, dict)]
+    tasks.add_task(_garmin_files, items)
+    return {"ok": True}
+
+
+def _garmin_files(items: list[dict]) -> None:
+    for item in items:
+        try:
+            with session() as conn:
+                runner = garmin.runner_for_user(conn, str(item.get("userId", "")))
+                if runner is None or not garmin.wanted(item):
+                    continue
+                runner = dict(runner)
+                res = garmin.store_item(conn, runner, item)
+            record.schedule_export(runner["runner_id"])
+            if res.get("status") != "stored" or not settings.garmin_ai_allowed:
+                continue
+            if not (runner.get("onboarded_at") and runner.get("hermes_api_key")):
+                continue
+            source = garmin.attribution(res.get("device"))
+            if res["kind"] == "run" and not res.get("short"):
+                prompt = (f"A run just synced from {source} ({res['date']}, {res['distance_km']} km). Give the run "
+                          "debrief as usual (get_recent_runs for the numbers). Put this line directly under your "
+                          f"first sentence: \"{source}\". End with: \"Insights derived in part from Garmin "
+                          "device-sourced data.\" Then save_report.")
+            elif res["kind"] == "strength":
+                prompt = (f"A strength session just synced from {source} ({res['date']}). Give the strength debrief "
+                          f"as usual. Put \"{source}\" on its own line directly above the card. End with: "
+                          "\"Insights derived in part from Garmin device-sourced data.\" Then save_report.")
+            else:
+                continue
+            hermes.run_and_deliver(runner, prompt, kind="debrief")
+        except Exception:
+            log.exception("Garmin activity %s could not be processed", item.get("summaryId"))
+
+
+@app.post("/garmin/deregistration")
+async def garmin_deregistration(request: Request):
+    body = await _garmin_body(request)
+    with session() as conn:
+        for item in body.get("deregistrations") or []:
+            rid = garmin.unlink_user(conn, str(item.get("userId", "")))
+            if rid:
+                queries.create_alert(conn, rid, "other", "Disconnected Garmin Connect; syncing has stopped.")
+    return {"ok": True}
+
+
+@app.post("/garmin/permissions")
+async def garmin_permissions(request: Request):
+    body = await _garmin_body(request)
+    with session() as conn:
+        garmin.permissions_changed(conn, body)
+    return {"ok": True}
 
 
 # ---- Hevy webhook (public through the tunnel: /hevy/webhook only) --------------
