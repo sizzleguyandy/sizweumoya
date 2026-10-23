@@ -67,7 +67,7 @@ def main() -> None:
     bt.add_argument("--runner", type=int, required=True)
     w = sub.add_parser("welcome", help="Sarah sends the welcome and starts onboarding")
     w.add_argument("--runner", type=int, required=True)
-    lp = sub.add_parser("load-programme", help="load a run and/or strength programme from a CSV")
+    lp = sub.add_parser("load-programme", help="load a programme from the Excel template (or a CSV)")
     lp.add_argument("--runner", type=int, required=True)
     lp.add_argument("--file", required=True)
     lp.add_argument("--replace", action="store_true", help="end the current programme of the same type first")
@@ -317,7 +317,7 @@ def main() -> None:
         text = hermes.run_and_deliver(runner, WELCOME_PROMPT, kind="welcome")
         print("Welcome sent:\n" + text)
     elif args.cmd == "load-programme":
-        print(json.dumps(programme.load_csv(conn, args.runner, args.file, replace=args.replace), indent=2))
+        print(json.dumps(programme.load(conn, args.runner, args.file, replace=args.replace), indent=2))
         _calendar(conn, args.runner)
         record.export_runner(conn, args.runner)
     elif args.cmd == "export-record":

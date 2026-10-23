@@ -37,8 +37,10 @@ every session with the plan). Load a programme:
 ```
 python -m app.admin load-programme --runner <id> --file programme.csv [--replace]
 ```
-CSV columns: `date,type,description,km,kind,hr_low,hr_high,exercises` (type `run` or `strength`;
-exercises separated by `;`). Running plans can also come from the tracker workbook (`import-tracker`).
+Write programmes in **`templates/programme_template.xlsx`** (sheet "Programme", one row per
+session, drop-downs for type and kind, help on each heading, a filled "Example" sheet, optional
+"Races" sheet). A CSV with the same columns also works:
+`date,type,description,km,kind,hr_low,hr_high,climb_m,exercises,steps`. Running plans can also come from the tracker workbook (`import-tracker`).
 
 ## The personal record
 `runners.db` is the single source of truth. Each person also has their own complete file,

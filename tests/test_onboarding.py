@@ -221,3 +221,35 @@ def test_buttons_payload(monkeypatch):
     assert url.endswith("/sendMessage") and body["chat_id"] == "111"
     assert body["reply_markup"]["keyboard"] == [[{"text": "Today's plan"}, {"text": "My week"}]]
     assert body["reply_markup"]["is_persistent"] is True
+
+
+def test_excel_template_loads(conn, tmp_path):
+    import shutil
+    import openpyxl
+    rid, _, _ = add_runner(conn, "Sam", "333", 185, None)
+    path = tmp_path / "p.xlsx"
+    shutil.copy("templates/programme_template.xlsx", path)
+    wb = openpyxl.load_workbook(path)
+    ex, prog = wb["Example"], wb["Programme"]
+    for row in ex.iter_rows(min_row=2, values_only=True):
+        prog.append(list(row))
+    wb["Races"].append(["Grape Run", datetime(2026, 11, 15), 21.1, 445, "05:45 start"])
+    wb.save(path)
+    res = programme.load(conn, rid, str(path))
+    assert res["run"]["sessions"] == 6 and res["strength"]["sessions"] == 1 and res["races_added"] == 1
+    hills = conn.execute("SELECT target FROM planned_workouts WHERE description LIKE 'Hill%'").fetchone()[0]
+    t = json.loads(hills)
+    assert t["hr_range"] == [160, 175] and t["climb_m"] == 120 and t["steps"].startswith("- 15m Z2 HR\n6x")
+    easy = json.loads(conn.execute("SELECT target FROM planned_workouts WHERE description='Easy run'").fetchone()[0])
+    assert easy["hr_max"] == 144
+    # The template as shipped has an empty Programme sheet: loading it is refused, never half-done.
+    with pytest.raises(programme.ProgrammeError):
+        programme.load(conn, rid, "templates/programme_template.xlsx")
+
+
+def test_bad_kind_is_refused(conn, tmp_path):
+    rid, _, _ = add_runner(conn, "Sam", "333", 185, None)
+    f = tmp_path / "p.csv"
+    f.write_text("date,type,description,kind\n2026-11-03,run,Easy,jog\n")
+    with pytest.raises(programme.ProgrammeError, match="kind"):
+        programme.load(conn, rid, str(f))
