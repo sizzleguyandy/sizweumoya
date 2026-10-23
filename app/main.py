@@ -12,7 +12,7 @@ from datetime import date
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
-from . import hermes, plans, queries, record, trends
+from . import hermes, hevy, plans, queries, record, trends
 from .db import connect, init_db, session
 
 logging.basicConfig(level=logging.INFO)
@@ -27,6 +27,43 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="Runner Assistant Coach data service", lifespan=lifespan)
+
+
+# ---- Hevy webhook (public through the tunnel: /hevy/webhook only) --------------
+
+@app.post("/hevy/webhook")
+async def hevy_webhook(request: Request, tasks: BackgroundTasks):
+    """Hevy needs 200 within 5 s: check who it's for, queue the work, answer."""
+    with session() as conn:
+        runner = hevy.runner_for_secret(conn, request.headers.get("authorization", ""))
+    if runner is None:
+        raise HTTPException(401)
+    try:
+        body = await request.json()
+        workout_id = str(body["workoutId"])
+    except Exception:
+        raise HTTPException(400) from None
+    if not workout_id.replace("-", "").isalnum() or len(workout_id) > 64:
+        raise HTTPException(400)
+    tasks.add_task(_hevy_workout, dict(runner), workout_id)
+    return {"ok": True}
+
+
+def _hevy_workout(runner: dict, workout_id: str) -> None:
+    try:
+        workout = hevy.fetch_workout(runner["api_key"], workout_id)
+        with session() as conn:
+            res = hevy.store(conn, runner, workout)
+        record.schedule_export(runner["runner_id"])
+        if res["status"] != "duplicate" and runner.get("onboarded_at") and runner.get("hermes_api_key"):
+            hermes.run_and_deliver(
+                runner, "A strength workout was just saved in Hevy and is now in the record "
+                f"({res['date']}, {res['title']}, {res['sets']} working sets"
+                + (", edited" if res["status"] == "updated" else "") + "). Give the strength debrief: "
+                "call get_last_strength_session and get_strength_review, follow the strength guidance, "
+                "one tip at most, then save_report.", kind="strength_debrief")
+    except Exception:
+        log.exception("Hevy workout %s for runner %s could not be processed", workout_id, runner["runner_id"])
 
 
 @app.get("/health")

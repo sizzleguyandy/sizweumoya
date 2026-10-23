@@ -177,6 +177,15 @@ CREATE TABLE IF NOT EXISTS races (
     note        TEXT
 );
 
+-- Hevy connection per person: their own API key and the secret Hevy sends with each webhook.
+-- Never copied into the personal record file.
+CREATE TABLE IF NOT EXISTS hevy_links (
+    runner_id      INTEGER PRIMARY KEY REFERENCES runners(runner_id) ON DELETE CASCADE,
+    api_key        TEXT NOT NULL,
+    secret_hash    TEXT NOT NULL UNIQUE,          -- sha256 of the webhook authorization secret
+    connected_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS approvals (
     id          TEXT PRIMARY KEY,             -- random request id
     runner_id   INTEGER NOT NULL REFERENCES runners(runner_id) ON DELETE CASCADE,

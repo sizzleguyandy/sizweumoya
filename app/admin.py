@@ -14,12 +14,14 @@
   python -m app.admin load-programme --runner 2 --file programme.csv [--replace]
   python -m app.admin export-record --runner 2 [--to path.db]
   python -m app.admin offboard --runner 2 [--keep-copy path.db]
+  HEVY_API_KEY=... python -m app.admin hevy-connect --runner 1
+  python -m app.admin hevy-import --runner 1 --since 2026-08-01
   python -m app.admin import-tracker --runner 1 --file tracker.xlsx [--replace]
 """
 import argparse
 import json
 
-from . import hermes, keyboard, onboarding, programme, record, stats, tracker_import
+from . import hermes, hevy, keyboard, onboarding, programme, record, stats, tracker_import
 from .config import settings
 from .db import connect, init_db
 from .identity import hash_token, new_token
@@ -83,6 +85,12 @@ def main() -> None:
     z.add_argument("--zones", required=True, help="upper bounds of Z1-Z4, e.g. 132,144,152,162")
     z.add_argument("--max-hr", type=int)
     z.add_argument("--easy-cap", type=int)
+    hc = sub.add_parser("hevy-connect", help="link a person's Hevy account (key read from HEVY_API_KEY)")
+    hc.add_argument("--runner", type=int, required=True)
+    hc.add_argument("--public-url", default="https://coach.sizweumoya.com")
+    hi = sub.add_parser("hevy-import", help="import past Hevy workouts")
+    hi.add_argument("--runner", type=int, required=True)
+    hi.add_argument("--since", required=True, help="YYYY-MM-DD")
     t = sub.add_parser("import-tracker")
     t.add_argument("--runner", type=int, required=True)
     t.add_argument("--file", required=True)
@@ -156,6 +164,41 @@ def main() -> None:
         print(dict(conn.execute("SELECT name, hr_zones, max_hr, easy_hr_cap, zones_locked FROM runners"
                                 " WHERE runner_id=?", (args.runner,)).fetchone()))
         print("Applies to runs stored from now on. Runs already stored keep their zone times.")
+    elif args.cmd == "hevy-connect":
+        import os
+        key = os.environ.get("HEVY_API_KEY", "")
+        if not key:
+            raise SystemExit("Set HEVY_API_KEY in the environment first (never on the command line).")
+        try:
+            secret = hevy.connect(conn, args.runner, key)
+        except hevy.HevyError as e:
+            raise SystemExit(str(e))
+        print("Hevy linked. In Hevy (hevy.com/settings?developer) > Webhooks, enter:")
+        print(f"  Url: {args.public_url.rstrip('/')}/hevy/webhook")
+        print(f"  Authorization header: Bearer {secret}")
+        print("This secret is shown once; only its hash is stored. Then press Subscribe.")
+    elif args.cmd == "hevy-import":
+        link = conn.execute("SELECT r.*, h.api_key FROM hevy_links h JOIN runners r ON r.runner_id=h.runner_id"
+                            " WHERE h.runner_id=?", (args.runner,)).fetchone()
+        if link is None:
+            raise SystemExit("run hevy-connect first")
+        counts = {"stored": 0, "updated": 0, "duplicate": 0}
+        page = 1
+        while True:
+            batch = hevy.list_workouts(link["api_key"], page)
+            if not batch:
+                break
+            older = False
+            for w in batch:
+                if (w.get("start_time") or "")[:10] < args.since:
+                    older = True
+                    continue
+                counts[hevy.store(conn, link, w)["status"]] += 1
+            if older:
+                break
+            page += 1
+        record.export_runner(conn, args.runner)
+        print(counts)
     elif args.cmd == "import-tracker":
         runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (args.runner,)).fetchone()
         if runner is None:

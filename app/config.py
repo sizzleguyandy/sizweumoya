@@ -22,6 +22,8 @@ class Settings:
 
     # Where Hermes saves files a runner sends to the bot. {profile} is the authenticated
     # profile name, so each runner can only submit files from their own folder.
+    hevy_base_url: str = field(default_factory=lambda: _env("HEVY_BASE_URL", "https://api.hevyapp.com"))
+
     hermes_home: str = field(default_factory=lambda: _env("HERMES_HOME", ""))
     upload_root_template: str = field(
         default_factory=lambda: _env("UPLOAD_ROOT", "{hermes_home}/profiles/{profile}"))

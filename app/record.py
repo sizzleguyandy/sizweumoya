@@ -9,6 +9,7 @@ Secrets (MCP token hash, Hermes API key) are never copied into it.
 import json
 import logging
 import os
+import re
 import sqlite3
 import threading
 from datetime import date, datetime
@@ -152,7 +153,9 @@ def summary(conn, rid: int) -> dict:
 def _schema_without_fk() -> str:
     """The tables only (indexes and foreign keys are not needed in a one-runner copy)."""
     text = SCHEMA.read_text().partition("CREATE INDEX")[0]
-    # Secrets are left out of the copy, so their columns must accept NULL there.
+    # Secrets are left out of the copy, so their columns must accept NULL there, and tables
+    # that only hold connection secrets are not created at all.
+    text = re.sub(r"(--[^\n]*\n)*CREATE TABLE IF NOT EXISTS hevy_links \(.*?\);\n", "", text, flags=re.S)
     return text.replace("mcp_token_hash    TEXT NOT NULL", "mcp_token_hash    TEXT")
 
 
