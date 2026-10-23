@@ -16,6 +16,7 @@
   python -m app.admin offboard --runner 2 [--keep-copy path.db]
   INTERVALS_API_KEY=... python -m app.admin intervals-connect --runner 1 --athlete-id i12345
   python -m app.admin intervals-push --runner 1 [--days 28] [--dry-run]
+  python -m app.admin set-steps --runner 1 --date 2026-10-29 --steps "- 15m Z2 HR|4x|- 3m Z4 HR|- 3m Z1 HR|- 10m Z2 HR"
   python -m app.admin intervals-pull --runner 1 --since 2026-10-01
   python -m app.admin garmin-link --runner 1 --user-id <Garmin userId>
   HEVY_API_KEY=... python -m app.admin hevy-connect --runner 1
@@ -96,6 +97,10 @@ def main() -> None:
     ip.add_argument("--runner", type=int, required=True)
     ip.add_argument("--days", type=int, default=28)
     ip.add_argument("--dry-run", action="store_true", help="show what would be sent, send nothing")
+    ss = sub.add_parser("set-steps", help="Coach Andy: structured watch steps for one planned session")
+    ss.add_argument("--runner", type=int, required=True)
+    ss.add_argument("--date", required=True)
+    ss.add_argument("--steps", required=True, help='Intervals.icu workout text, lines separated by "|"')
     il = sub.add_parser("intervals-pull", help="import activities and wellness from Intervals.icu")
     il.add_argument("--runner", type=int, required=True)
     il.add_argument("--since", required=True)
@@ -197,6 +202,16 @@ def main() -> None:
             print(f"{len(res['events'])} sessions would be sent.")
         else:
             print(res)
+    elif args.cmd == "set-steps":
+        rows_ = conn.execute("SELECT w.id, w.target, w.description FROM planned_workouts w JOIN plans p ON p.id=w.plan_id"
+                             " WHERE w.runner_id=? AND w.date=? AND p.active=1", (args.runner, args.date)).fetchall()
+        if len(rows_) != 1:
+            raise SystemExit(f"expected one planned session on {args.date}, found {len(rows_)}")
+        t = json.loads(rows_[0]["target"] or "{}")
+        t["steps"] = "\n".join(x.strip() for x in args.steps.split("|") if x.strip())
+        conn.execute("UPDATE planned_workouts SET target=? WHERE id=?", (json.dumps(t), rows_[0]["id"]))
+        conn.commit()
+        print(f"{args.date} {rows_[0]['description'][:50]}\n{t['steps']}")
     elif args.cmd == "intervals-pull":
         from datetime import date as _d
         since = _d.fromisoformat(args.since)

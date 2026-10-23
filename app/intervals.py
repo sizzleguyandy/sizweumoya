@@ -70,14 +70,21 @@ def to_event(w, runner) -> dict:
     if t.get("km"):
         lines.append(f"Distance: {t['km']:g} km")
     cap = t.get("hr_max") or (runner["easy_hr_cap"] if t.get("kind") in ("easy", "long") else None)
-    if t.get("hr_range"):
+    if t.get("hr_range") and t.get("kind") == "long":
+        # A long run with faster parts: easy running under the cap, the marked parts in the range.
+        if cap:
+            lines.append(f"Easy running: under {cap} bpm")
+        lines.append(f"Faster parts: {t['hr_range'][0]}-{t['hr_range'][1]} bpm")
+    elif t.get("hr_range"):
         lines.append(f"Heart rate: {t['hr_range'][0]}-{t['hr_range'][1]} bpm")
     elif cap:
         lines.append(f"Heart rate: under {cap} bpm")
     if t.get("exercises"):
         lines += [f"- {e}" for e in t["exercises"]]
     steps = t.get("steps")
-    if not steps and is_run and t.get("kind") in ("easy", "long") and t.get("km"):
+    # Only all-easy runs get an automatic one-step workout; anything with faster parts needs
+    # steps written by Coach Andy, otherwise the watch would coach the whole run as easy.
+    if not steps and is_run and t.get("kind") in ("easy", "long") and t.get("km") and not t.get("hr_range"):
         steps = f"- {t['km']:g}km {_hr_zone_text(t)}".strip()   # a simple one-step run the watch can follow
     description = "\n".join(lines) + (f"\n\n{steps}" if steps else "")
     return {"category": "WORKOUT" if steps or is_run else "NOTE",

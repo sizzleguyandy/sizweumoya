@@ -92,3 +92,15 @@ def test_errors_are_reported(db, monkeypatch):
     mock(monkeypatch, lambda req: httpx.Response(401, text="bad key"))
     with pytest.raises(intervals.IntervalsError, match="401"):
         intervals.push(c, rid)
+
+
+def test_long_run_with_faster_parts_is_not_sent_as_all_easy(db):
+    c, rid = db
+    pid = c.execute("SELECT plan_id FROM planned_workouts LIMIT 1").fetchone()[0]
+    c.execute("INSERT INTO planned_workouts (plan_id, runner_id, date, description, target) VALUES (?,?,?,?,?)",
+              (pid, rid, (TODAY + timedelta(days=4)).isoformat(), "Hilly. Last 20min @ HM effort",
+               json.dumps({"kind": "long", "km": 16, "hr_range": [152, 163]})))
+    c.commit()
+    ev = [e for e in intervals.push(c, rid, dry_run=True)["events"] if "Hilly" in e["name"]][0]
+    assert "- 16km Z2 HR" not in ev["description"]
+    assert "Easy running: under 144 bpm" in ev["description"] and "Faster parts: 152-163 bpm" in ev["description"]
