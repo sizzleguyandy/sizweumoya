@@ -40,8 +40,8 @@ def test_parse_and_store_skips_warmups_and_handles_edits(db):
     c, rid = db
     r = c.execute("SELECT * FROM runners").fetchone()
     res = hevy.store(c, r, WORKOUT)
-    assert res == {"status": "stored", "date": "2026-10-21", "title": "Upper A", "sets": 3, "exercises": 2,
-                   "plan": None}
+    assert res == {"status": "stored", "replaced_manual": 0, "date": "2026-10-21", "title": "Upper A", "sets": 3,
+                   "exercises": 2, "plan": None}
     last = queries.last_strength_session(c, rid)
     assert [(s["exercise"], s["reps"], s["weight_kg"]) for s in last["sets"]][:2] == [
         ("chest press (machine)", 5, 35.0), ("chest press (machine)", 7, 35.0)]
@@ -92,3 +92,15 @@ def test_free_tier_cannot_connect(db):
     c.commit()
     with pytest.raises(hevy.HevyError, match="paid"):
         hevy.connect(c, rid, "a-real-looking-hevy-api-key-0001")
+
+
+def test_hevy_replaces_the_same_day_typed_or_sheet_session(db):
+    from app import ingest
+    c, rid = db
+    r = c.execute("SELECT * FROM runners").fetchone()
+    ingest.store_strength_text(c, r, "Chest press 5x5 35kg", "2026-10-21")
+    ingest.store_strength_text(c, r, "Squat 3x5 80kg", "2026-10-19")
+    res = hevy.store(c, r, WORKOUT)
+    assert res["replaced_manual"] == 1
+    assert sorted(x[0] for x in c.execute("SELECT source FROM strength_sessions")) == ["hevy", "text"]
+    assert hevy.store(c, r, WORKOUT)["status"] == "duplicate"   # and no further deletions

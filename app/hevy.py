@@ -110,10 +110,20 @@ def parse(workout: dict) -> dict:
             "updated_at": workout.get("updated_at"), "sets": sets}
 
 
+def replace_manual_sessions(conn, rid: int, day: str) -> int:
+    """Hevy has the full detail, so a session typed to Sarah or imported from a spreadsheet for
+    the same day is the same workout recorded twice: remove it (its sets go with it)."""
+    n = conn.execute("DELETE FROM strength_sessions WHERE runner_id=? AND date=? AND source IN ('sheet','text')",
+                     (rid, day)).rowcount
+    conn.commit()
+    return n
+
+
 def store(conn, runner, workout: dict) -> dict:
     """Store (or replace, if edited in Hevy) one workout. Key: hevy:<workout id>."""
     w = parse(workout)
     key = f"hevy:{w['id']}"
+    replaced = replace_manual_sessions(conn, runner["runner_id"], w["date"])
     old = conn.execute("SELECT id, raw_description FROM strength_sessions WHERE activity_key=?", (key,)).fetchone()
     if old:
         if old["raw_description"] == (w["updated_at"] or ""):
@@ -131,5 +141,5 @@ def store(conn, runner, workout: dict) -> dict:
           s["distance_m"]) for s in w["sets"]])
     conn.commit()
     plan = plans.match_strength(conn, runner["runner_id"], w["date"], key)
-    return {"status": "updated" if old else "stored", "date": w["date"], "title": w["title"],
+    return {"status": "updated" if old else "stored", "replaced_manual": replaced, "date": w["date"], "title": w["title"],
             "sets": len(w["sets"]), "exercises": len({s["exercise"] for s in w["sets"]}), "plan": plan}

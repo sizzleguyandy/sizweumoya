@@ -242,7 +242,7 @@ def main() -> None:
                             " WHERE h.runner_id=?", (args.runner,)).fetchone()
         if link is None:
             raise SystemExit("run hevy-connect first")
-        counts = {"stored": 0, "updated": 0, "duplicate": 0}
+        counts = {"stored": 0, "updated": 0, "duplicate": 0, "replaced_manual": 0}
         page = 1
         while True:
             batch = hevy.list_workouts(link["api_key"], page)
@@ -253,7 +253,9 @@ def main() -> None:
                 if (w.get("start_time") or "")[:10] < args.since:
                     older = True
                     continue
-                counts[hevy.store(conn, link, w)["status"]] += 1
+                res = hevy.store(conn, link, w)
+                counts[res["status"]] += 1
+                counts["replaced_manual"] += res.get("replaced_manual", 0)
             if older:
                 break
             page += 1
