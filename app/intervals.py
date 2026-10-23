@@ -123,6 +123,12 @@ def push(conn, rid: int, start: date | None = None, days: int = 28, dry_run: boo
 
 # ---- pull: activities and wellness ----------------------------------------------------
 
+def from_strava(activity: dict) -> bool:
+    """True for anything that came from Strava, by any marker Intervals.icu gives."""
+    src = " ".join(str(activity.get(k) or "") for k in ("source", "external_id", "_note", "device_name")).upper()
+    return "STRAVA" in src or bool(activity.get("strava_id"))
+
+
 def pull_activities(conn, rid: int, since: date) -> dict:
     """Download new activities' original files and store them through the .fit pipeline."""
     link = link_for(conn, rid)
@@ -133,8 +139,8 @@ def pull_activities(conn, rid: int, since: date) -> dict:
         acts = _check(c.get(f"/athlete/{link['athlete_id']}/activities",
                             params={"oldest": since.isoformat(), "newest": date.today().isoformat()})).json()
         for a in acts:
-            if (a.get("source") or "").upper() == "STRAVA":
-                counts["skipped"] += 1   # Strava-sourced data is not ours to use
+            if from_strava(a):
+                counts["skipped"] += 1   # nothing from Strava is used anywhere in this system
                 continue
             try:
                 f = c.get(f"/activity/{a['id']}/fit-file")

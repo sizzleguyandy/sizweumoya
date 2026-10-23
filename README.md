@@ -1,9 +1,9 @@
 # Runner Assistant Coach – data service
 
-The data layer for a coach-led AI running assistant. Runners send their `.fit` files (and typed
-gym sessions) to the Telegram bot; this service reads them, calculates stats, stores everything in
-`runners.db`, and gives Hermes Agent a set of MCP tools. Strava is no longer used (see
-`docs/FIT_UPLOAD.md`). The head coach writes all plans; the AI gives feedback and escalates.
+The data layer for a coach-led AI running assistant. Activities come from `.fit` files people send to
+the Telegram bot, typed gym sessions, and Intervals.icu (which also carries programmes to the
+watch). This service reads them, calculates stats, stores everything in `runners.db`, and gives
+Hermes Agent a set of MCP tools. Nothing from Strava is used anywhere. The head coach writes all plans; the AI gives feedback and escalates.
 
 ```
 Runner ─► Telegram bot ─► Hermes profile ─► MCP server (app.mcp_server) ─► runners.db

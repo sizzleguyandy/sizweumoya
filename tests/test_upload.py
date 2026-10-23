@@ -395,3 +395,21 @@ def test_month_summary(env):
     assert m["longest_run_km"] == 10.0 and sum(w["km"] for w in m["weeks"]) == 16.0
     assert m["progress_status"] == "grey" and m["coaching_mode"] == "monitor"
     assert queries.month_summary(conn, rid, 2026, 12)["month"] == "December 2026"
+
+
+def test_purge_strava_leaves_everything_else(tmp_path, monkeypatch):
+    import subprocess, sys
+    dbp = tmp_path / "r.db"
+    c = connect(str(dbp))
+    init_db(c)
+    rid, _, _ = add_runner(c, "Tom", "1", 185, None)
+    for key, src in (("strava:1", "strava"), ("fit:abc", "fit")):
+        c.execute("INSERT INTO runs (runner_id, activity_key, source, date, distance_km) VALUES (?,?,?,?,?)",
+                  (rid, key, src, "2026-10-01", 5))
+    c.commit()
+    c.close()
+    env = {**__import__("os").environ, "RAC_DB_PATH": str(dbp), "RAC_RECORDS_DIR": str(tmp_path / "rec")}
+    out = subprocess.run([sys.executable, "-m", "app.admin", "purge-strava"], env=env, capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    c = connect(str(dbp))
+    assert [r[0] for r in c.execute("SELECT activity_key FROM runs")] == ["fit:abc"]

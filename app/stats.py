@@ -61,7 +61,7 @@ def hr_drift_pct(time_s: list[float], hr: list[float], velocity: list[float]) ->
 
 def classify_run(name: str, workout_type: int | None, distance_km: float,
                  zone_s: list[int], long_km: float = 16.0) -> str:
-    """Strava workout_type for runs: 1 race, 2 long, 3 workout."""
+    """workout_type (optional, from older data): 1 race, 2 long, 3 workout. Otherwise from the name/caption."""
     lname = (name or "").lower()
     if workout_type == 1 or "race" in lname or "parkrun" in lname:
         return "race"

@@ -21,6 +21,7 @@
   python -m app.admin garmin-link --runner 1 --user-id <Garmin userId>
   HEVY_API_KEY=... python -m app.admin hevy-connect --runner 1
   python -m app.admin hevy-import --runner 1 --since 2026-08-01
+  python -m app.admin purge-strava
   python -m app.admin import-tracker --runner 1 --file tracker.xlsx [--replace]
 """
 import argparse
@@ -114,6 +115,7 @@ def main() -> None:
     hi = sub.add_parser("hevy-import", help="import past Hevy workouts")
     hi.add_argument("--runner", type=int, required=True)
     hi.add_argument("--since", required=True, help="YYYY-MM-DD")
+    sub.add_parser("purge-strava", help="delete anything left from the old Strava version")
     t = sub.add_parser("import-tracker")
     t.add_argument("--runner", type=int, required=True)
     t.add_argument("--file", required=True)
@@ -257,6 +259,18 @@ def main() -> None:
             page += 1
         record.export_runner(conn, args.runner)
         print(counts)
+    elif args.cmd == "purge-strava":
+        out = {}
+        for table in ("runs", "strength_sessions"):
+            out[table] = conn.execute(f"DELETE FROM {table} WHERE activity_key LIKE 'strava:%' OR source='strava'"
+                                      ).rowcount
+        cols = [c[1] for c in conn.execute("PRAGMA table_info(runners)") if c[1].startswith("strava")]
+        for c in cols:
+            conn.execute(f"UPDATE runners SET {c}=NULL")
+        conn.commit()
+        for (rid,) in conn.execute("SELECT runner_id FROM runners").fetchall():
+            record.export_runner(conn, rid)
+        print(f"Deleted Strava rows: {out}. Cleared runner columns: {cols or 'none'}.")
     elif args.cmd == "import-tracker":
         runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (args.runner,)).fetchone()
         if runner is None:

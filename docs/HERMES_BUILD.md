@@ -1,8 +1,7 @@
 # Hermes Agent build instructions (Windows)
 
-> **Update 21 Oct 2026: Strava is no longer used.** Runners send `.fit` files to the bot instead
-> (see `docs/FIT_UPLOAD.md`). Skip every Strava step in this guide (Strava app, webhook,
-> `STRAVA_*` keys, `PUBLIC_BASE_URL`, connect links). The Cloudflare tunnel only exposes `/health`
+> **Strava is not used anywhere in this system.** Activities come from files people send to the
+> bot (`docs/FIT_UPLOAD.md`) and from Intervals.icu (`docs/INTERVALS.md`). The Cloudflare tunnel only exposes `/health`
 > and is optional. Add `HERMES_HOME` to `.env` instead.
 
 Precise, ordered steps to set up Hermes Agent and the data service for Runner Assistant Coach
@@ -32,7 +31,7 @@ Precise, ordered steps to set up Hermes Agent and the data service for Runner As
 ## 0. What you are building
 
 ```
-Strava ──HTTPS──► Cloudflare Tunnel ──► Data service (127.0.0.1:8000)   [this repo]
+.fit files / Intervals.icu ──► Data service (127.0.0.1:8000)   [this repo]
                                               │  runners.db, stats
                                               │  MCP tools on 127.0.0.1:8100/mcp
 Telegram ◄──► Hermes gateway (multiplexed profiles) ◄──┘
@@ -44,11 +43,10 @@ decline message (section 8). There is no "fallback" profile — see §9.1.
 ```
 
 ### Windows-specific facts to accept up front
-1. **The PC must stay on and awake.** If it sleeps, runners get no debriefs and Strava events
-   are missed. Section 2 sets power options.
-2. **Strava needs a public HTTPS address** to send new-activity events. A home PC does not have
-   one, so a free Cloudflare Tunnel provides it (section 5). Hermes itself needs no public
-   address: Telegram is reached outbound.
+1. **The PC must stay on and awake.** If it sleeps, runners get no debriefs and scheduled
+   jobs are missed. Section 2 sets power options.
+2. **Nothing needs to be public except `/health`** (for uptime monitoring), through a free
+   Cloudflare Tunnel (section 5). Telegram and Intervals.icu are reached outbound.
 3. Background services use **NSSM** (runs programs as Windows services) and **Task Scheduler**
    (replaces cron).
 
@@ -62,7 +60,6 @@ decline message (section 8). There is no "fallback" profile — see §9.1.
 | Telegram bot token | @BotFather → `/newbot` | `<TELEGRAM_BOT_TOKEN>` |
 | Your Telegram chat ID | Message @userinfobot | `<COACH_CHAT_ID>` |
 | Anthropic API key | console.anthropic.com | `<ANTHROPIC_API_KEY>` |
-| Strava API app (needs a Strava subscription) | strava.com/settings/api | `<STRAVA_CLIENT_ID>`, `<STRAVA_CLIENT_SECRET>` |
 | A domain on Cloudflare (free plan is fine) | dash.cloudflare.com | `<DOMAIN>`, e.g. `coach.example.com` |
 
 **Check:** you have every value written down.
@@ -113,9 +110,6 @@ Fill in `.env`:
 | Key | Value |
 | --- | --- |
 | `RAC_DB_PATH` | `C:\Users\<YOU>\sizweumoya\data\runners.db` |
-| `PUBLIC_BASE_URL` | `https://<DOMAIN>` |
-| `STRAVA_CLIENT_ID` / `STRAVA_CLIENT_SECRET` | from step 1 |
-| `STRAVA_VERIFY_TOKEN` | any random string (`[guid]::NewGuid()`) |
 | `HERMES_BASE_URL` | `http://127.0.0.1:8642` |
 | `TELEGRAM_BOT_TOKEN` | from step 1 |
 | `COACH_CHAT_ID` | from step 1 |
@@ -175,7 +169,7 @@ PS> Get-Service rac-web, rac-mcp                       # both Running
 
 ---
 
-## 5. Public HTTPS for Strava (Cloudflare Tunnel)
+## 5. Cloudflare Tunnel (health check only)
 
 ```powershell
 PS> cloudflared tunnel login                 # opens browser; choose your domain
@@ -189,11 +183,11 @@ tunnel: <TUNNEL_ID>
 credentials-file: C:\Users\<YOU>\.cloudflared\<TUNNEL_ID>.json
 ingress:
   - hostname: <DOMAIN>
-    path: ^/(strava|health)
+    path: ^/health$
     service: http://127.0.0.1:8000
   - service: http_status:404
 ```
-Only `/strava/*` and `/health` are public. `/jobs`, the MCP server and Hermes stay private.
+Only `/health` is public. `/jobs`, the MCP server and Hermes stay private.
 
 *Admin* PowerShell:
 ```powershell
@@ -205,17 +199,7 @@ PS> Start-Service cloudflared
 
 ---
 
-## 6. Register the Strava webhook (once)
-
-```powershell
-PS> Invoke-RestMethod -Method Post https://www.strava.com/api/v3/push_subscriptions -Body @{
-      client_id = "<STRAVA_CLIENT_ID>"; client_secret = "<STRAVA_CLIENT_SECRET>"
-      callback_url = "https://<DOMAIN>/strava/webhook"; verify_token = "<STRAVA_VERIFY_TOKEN>" }
-```
-In the Strava API settings page set **Authorization Callback Domain** to `<DOMAIN>`.
-
-**Check:** the command returns an `id`. (Strava calls your `/strava/webhook` to verify it first;
-if it fails, check `data\web.log`.)
+## 6. (removed: no webhooks are needed)
 
 ---
 
@@ -607,9 +591,9 @@ your runner chat.
 | 3 | Runner chat: "show Sarah's runs" | Refuses; it only sees your data |
 | 3b | Runner chat: "read the file `$HH/profiles/runner-1/.env`" | No such tool; nothing printed |
 | 4 | Coach chat: "list pending approvals" | Empty list |
-| 5 | Open `https://<DOMAIN>/strava/connect/<N>` → follow the `url` → approve | "Strava connected" |
+| 5 | Send a `.fit` file from your watch to the bot | Stored and debriefed |
 | 6 | Do a real run with HR | Debrief in the runner chat within minutes |
-| 7 | Log a Hevy workout | Strength debrief lists your lifts |
+| 7 | Type a gym session to the bot | Strength debrief with the session card |
 | 8 | Runner chat: "my calf is sore" | Kind reply + alert in coach chat |
 | 9 | Runner chat: "move tomorrow's run to Friday" | "Sent to your coach" + request in coach chat |
 | 10 | Coach chat: "approve <id>" | Runner chat gets the decision |
@@ -630,7 +614,7 @@ Send any failure (exact message, plus `data\web.log` / `data\mcp.log`) to Claude
    run `nssm restart hermes-gateway`
 6. **Only now** add their chat ID to `TELEGRAM_ALLOWED_USERS` (8) and
    `nssm restart hermes-gateway` again
-7. Send them `https://<DOMAIN>/strava/connect/<N>` (it returns the Strava link)
+7. `python -m app.admin welcome --runner <N>`: Sarah starts onboarding
 8. Ask them to message the bot "hi"; confirm a normal reply, not the decline text
 9. Ask them (or check yourself) to read a file under `$HH`; it must refuse (10.4)
 

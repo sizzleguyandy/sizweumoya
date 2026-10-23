@@ -111,3 +111,10 @@ def test_short_titles():
     assert intervals.short_name("Hilly. Last 20min @ HM effort") == "Hilly"
     assert intervals.short_name("Easy run") == "Easy run"
     assert len(intervals.short_name("x" * 80)) == 40
+
+
+def test_anything_from_strava_is_recognised():
+    assert intervals.from_strava({"source": "STRAVA"})
+    assert intervals.from_strava({"source": "OAUTH_CLIENT", "strava_id": 123})
+    assert intervals.from_strava({"_note": "STRAVA activities are not available via the API"})
+    assert not intervals.from_strava({"source": "OAUTH_CLIENT", "device_name": "Amazfit Balance 2"})
