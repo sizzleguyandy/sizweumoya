@@ -142,6 +142,12 @@ def store_strength_text(conn, runner, text: str, date: str) -> dict:
     key = "text:" + hashlib.sha256(f"{runner['runner_id']}|{date}|{text.strip()}".encode()).hexdigest()
     if exists(conn, key):
         return {"duplicate": True}
+    synced = conn.execute("SELECT id, title FROM strength_sessions WHERE runner_id=? AND date=? AND source='hevy'",
+                          (runner["runner_id"], date)).fetchone()
+    if synced:
+        # The full workout is already here from Hevy; a typed copy would count it twice.
+        return {"duplicate": True, "already_synced_from": "hevy", "session_id": synced["id"],
+                "title": synced["title"]}
     sets, unparsed = workout_text.parse(text)
     cur = conn.execute(
         "INSERT INTO strength_sessions (runner_id, activity_key, source, date, title, raw_description,"

@@ -102,7 +102,8 @@ def log_workout(ctx: Context, text: str, date: str = "") -> dict:
     it, never rewritten or summarised: the parser reads "Squat 3x8 60kg", "Press 3x10 + 2x7 30kg",
     "Plank 3x45s" and Hevy's shared workout text ("Set 1: 60 kg x 5" lines) itself.
     `date` is YYYY-MM-DD (default today). Returns how many sets were stored and any lines it
-    didn't understand; ask about those lines rather than guessing."""
+    didn't understand; ask about those lines rather than guessing. `already_synced_from: hevy`
+    means that day's workout already arrived from Hevy: nothing was stored, show that session."""
     when = date or _date.today().isoformat()
     try:
         _date.fromisoformat(when)

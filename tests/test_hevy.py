@@ -104,3 +104,26 @@ def test_hevy_replaces_the_same_day_typed_or_sheet_session(db):
     assert res["replaced_manual"] == 1
     assert sorted(x[0] for x in c.execute("SELECT source FROM strength_sessions")) == ["hevy", "text"]
     assert hevy.store(c, r, WORKOUT)["status"] == "duplicate"   # and no further deletions
+
+
+def test_typing_a_session_after_hevy_synced_it_is_refused(db):
+    from app import ingest
+    c, rid = db
+    r = c.execute("SELECT * FROM runners").fetchone()
+    hevy.store(c, r, WORKOUT)
+    res = ingest.store_strength_text(c, r, "Chest press 3x5 35kg", "2026-10-21")
+    assert res["duplicate"] and res["already_synced_from"] == "hevy"
+    assert c.execute("SELECT COUNT(*) FROM strength_sessions").fetchone()[0] == 1
+    assert not ingest.store_strength_text(c, r, "Squat 3x5 80kg", "2026-10-20")["duplicate"]
+
+
+def test_reimport_cleans_typed_copies_added_after_the_sync(db):
+    c, rid = db
+    r = c.execute("SELECT * FROM runners").fetchone()
+    hevy.store(c, r, WORKOUT)
+    # a typed copy that slipped in before the refusal existed
+    c.execute("INSERT INTO strength_sessions (runner_id, activity_key, source, date) VALUES (?,?,?,?)",
+              (rid, "text:x", "text", "2026-10-21"))
+    c.commit()
+    res = hevy.store(c, r, WORKOUT)
+    assert res["status"] == "duplicate" and c.execute("SELECT COUNT(*) FROM strength_sessions").fetchone()[0] == 1
