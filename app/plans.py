@@ -146,7 +146,8 @@ def sessions_around(conn, rid: int, today: date | None = None) -> dict:
         out = []
         for w in conn.execute(sql, args).fetchall():
             t = _target(w)
-            out.append({"date": w["date"], "type": w["ptype"], "description": w["description"],
+            out.append({"date": w["date"], "weekday": date.fromisoformat(w["date"]).strftime("%A"),
+                        "type": w["ptype"], "description": w["description"],
                         "status": w["status"],
                         **{k: t[k] for k in ("kind", "km", "hr_range", "climb_m", "week", "phase", "exercises")
                            if k in t}})
@@ -227,3 +228,38 @@ def week_vs_programme(conn, rid: int, start: date, end: date, actual: dict) -> d
                            "actual_climb_m": got["elevation_m"] if got else None,
                            "avg_hr": got["avg_hr"] if got else None}
     return out
+
+
+# ---- changing the programme (only on Coach Andy's decision) ------------------------
+
+class PlanChangeError(ValueError):
+    pass
+
+
+def move_session(conn, rid: int, from_date: str, to_date: str, note: str = "") -> dict:
+    """Move one open session of the active programme to another day. Coach decisions only."""
+    try:
+        a, b = date.fromisoformat(from_date), date.fromisoformat(to_date)
+    except ValueError:
+        raise PlanChangeError("dates must be YYYY-MM-DD") from None
+    ws = conn.execute(
+        "SELECT w.* FROM planned_workouts w JOIN plans p ON p.id=w.plan_id WHERE w.runner_id=? AND p.active=1"
+        " AND w.date=? AND w.status IN ('planned','missed')", (rid, a.isoformat())).fetchall()
+    if not ws:
+        raise PlanChangeError(f"no open session on {a:%A} {a.isoformat()}")
+    if len(ws) > 1:
+        raise PlanChangeError(f"more than one session on {a.isoformat()}; say which one")
+    w = ws[0]
+    t = _target(w)
+    t["day"] = b.strftime("%a")
+    t.setdefault("moved_from", a.isoformat())
+    if note:
+        t["change_note"] = note[:200]
+    conn.execute("UPDATE planned_workouts SET date=?, status='planned', target=? WHERE id=?",
+                 (b.isoformat(), json.dumps(t), w["id"]))
+    conn.commit()
+    others = [x["description"] for x in conn.execute(
+        "SELECT w.description FROM planned_workouts w JOIN plans p ON p.id=w.plan_id WHERE w.runner_id=?"
+        " AND p.active=1 AND w.date=? AND w.id!=?", (rid, b.isoformat(), w["id"]))]
+    return {"moved": w["description"], "from": f"{a:%A} {a.isoformat()}", "to": f"{b:%A} {b.isoformat()}",
+            "also_on_that_day": others}

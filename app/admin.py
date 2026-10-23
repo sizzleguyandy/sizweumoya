@@ -21,6 +21,7 @@
   python -m app.admin garmin-link --runner 1 --user-id <Garmin userId>
   HEVY_API_KEY=... python -m app.admin hevy-connect --runner 1
   python -m app.admin hevy-import --runner 1 --since 2026-08-01
+  python -m app.admin move-session --runner 1 --from 2026-10-23 --to 2026-10-24
   python -m app.admin purge-strava
   python -m app.admin import-tracker --runner 1 --file tracker.xlsx [--replace]
 """
@@ -115,6 +116,10 @@ def main() -> None:
     hi = sub.add_parser("hevy-import", help="import past Hevy workouts")
     hi.add_argument("--runner", type=int, required=True)
     hi.add_argument("--since", required=True, help="YYYY-MM-DD")
+    mv = sub.add_parser("move-session", help="Coach Andy: move one programme session to another day")
+    mv.add_argument("--runner", type=int, required=True)
+    mv.add_argument("--from", dest="from_date", required=True)
+    mv.add_argument("--to", dest="to_date", required=True)
     sub.add_parser("purge-strava", help="delete anything left from the old Strava version")
     t = sub.add_parser("import-tracker")
     t.add_argument("--runner", type=int, required=True)
@@ -261,6 +266,18 @@ def main() -> None:
             page += 1
         record.export_runner(conn, args.runner)
         print(counts)
+    elif args.cmd == "move-session":
+        from . import plans
+        try:
+            res = plans.move_session(conn, args.runner, args.from_date, args.to_date, note="moved by Coach Andy")
+        except plans.PlanChangeError as e:
+            raise SystemExit(str(e))
+        print(res)
+        if conn.execute("SELECT 1 FROM intervals_links WHERE runner_id=?", (args.runner,)).fetchone():
+            from datetime import date as _d
+            a, b = sorted([_d.fromisoformat(args.from_date), _d.fromisoformat(args.to_date)])
+            print("calendar:", intervals.push(conn, args.runner, start=a, days=(b - a).days + 1))
+        record.export_runner(conn, args.runner)
     elif args.cmd == "purge-strava":
         out = {}
         for table in ("runs", "strength_sessions"):

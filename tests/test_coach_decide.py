@@ -182,3 +182,51 @@ def test_only_the_coach_may_reply(conn, coach_ctx, delivered):
     with pytest.raises(PermissionError):
         mcp_server.coach_reply(intruder, "hello")
     assert delivered == []
+
+
+# ---- programme changes ------------------------------------------------------
+
+def _plan(conn, rid):
+    import json as _j
+    pid = conn.execute("INSERT INTO plans (runner_id, type, start_date, end_date) VALUES (?,?,?,?)",
+                       (rid, "run", "2026-10-20", "2026-11-15")).lastrowid
+    for d, desc in (("2026-10-23", "Easy run"), ("2026-10-25", "Long run")):
+        conn.execute("INSERT INTO planned_workouts (plan_id, runner_id, date, description, target) VALUES (?,?,?,?,?)",
+                     (pid, rid, d, desc, _j.dumps({"kind": "easy", "km": 5, "day": "Fri"})))
+    conn.commit()
+
+
+def test_approved_move_updates_the_programme(conn, coach_ctx, delivered, monkeypatch):
+    rid, profile, token = add_runner(conn, "Andy", "12345", 186, None)
+    _plan(conn, rid)
+    monkeypatch.setattr(hermes, "notify_coach", lambda text: None)
+    ctx = SimpleNamespace(headers={"x-hermes-profile": profile, "Authorization": f"Bearer {token}"})
+    msg = mcp_server.propose_plan_change(ctx, "couldn't run today", "move my easy run", "2026-10-23", "2026-10-24")
+    aid = msg.split("request ")[1].rstrip(").")
+    out = mcp_server.coach_decide(coach_ctx, aid, "approved")
+    assert "Programme updated" in out and "Saturday 2026-10-24" in out
+    assert [r[0] for r in conn.execute("SELECT date FROM planned_workouts ORDER BY date")] == ["2026-10-24", "2026-10-25"]
+    _wait_for(delivered)
+    assert "Programme updated: moved to Saturday 2026-10-24" in delivered[0][1]
+
+
+def test_rejected_move_changes_nothing(conn, coach_ctx, delivered, monkeypatch):
+    rid, profile, token = add_runner(conn, "Andy", "12345", 186, None)
+    _plan(conn, rid)
+    monkeypatch.setattr(hermes, "notify_coach", lambda text: None)
+    ctx = SimpleNamespace(headers={"x-hermes-profile": profile, "Authorization": f"Bearer {token}"})
+    aid = mcp_server.propose_plan_change(ctx, "r", "p", "2026-10-23", "2026-10-24").split("request ")[1].rstrip(").")
+    mcp_server.coach_decide(coach_ctx, aid, "rejected")
+    assert conn.execute("SELECT date FROM planned_workouts ORDER BY date").fetchone()[0] == "2026-10-23"
+
+
+def test_coach_can_see_and_move_a_runners_plan(conn, coach_ctx, delivered):
+    rid, _, _ = add_runner(conn, "Andy", "12345", 186, None)
+    _plan(conn, rid)
+    assert "error" in mcp_server.coach_runner_plan(coach_ctx, "nobody")
+    out = mcp_server.coach_move_session(coach_ctx, "andy", "2026-10-23", "2026-10-24")
+    assert out.startswith("Moved Easy run from Friday 2026-10-23 to Saturday 2026-10-24")
+    assert mcp_server.coach_move_session(coach_ctx, "andy", "2026-10-23", "2026-10-24").startswith("Not moved")
+    intruder = SimpleNamespace(headers={"x-hermes-profile": "runner-1", "Authorization": "Bearer nope-000"})
+    with pytest.raises(PermissionError):
+        mcp_server.coach_move_session(intruder, "andy", "2026-10-24", "2026-10-26")

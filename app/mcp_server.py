@@ -17,7 +17,7 @@ from mcp.server.mcpserver import Context, MCPServer
 
 from datetime import date as _date
 
-from . import hermes, ingest, keyboard, onboarding, paces, plans, queries, record, strength, trends, upload
+from . import hermes, ingest, intervals, keyboard, onboarding, paces, plans, queries, record, strength, trends, upload
 from .config import settings
 from .db import session
 from .identity import AccessDenied, hash_token, resolve_runner
@@ -309,12 +309,25 @@ def get_my_races(ctx: Context) -> list[dict]:
 
 
 @mcp.tool()
-def propose_plan_change(ctx: Context, reason: str, proposal: str) -> str:
-    """Ask the head coach to approve a change. Nothing changes until they decide."""
+def propose_plan_change(ctx: Context, reason: str, proposal: str, session_date: str = "",
+                        new_date: str = "") -> str:
+    """Ask the head coach to approve a change. Nothing changes until they decide.
+    To move a session to another day, also give session_date and new_date (YYYY-MM-DD): when
+    Coach Andy approves, the programme (and the watch calendar) is updated automatically.
+    Check the weekday of both dates with get_my_sessions before proposing."""
     r = _runner(ctx)
+    kind, payload = "plan", None
+    if session_date or new_date:
+        try:
+            a, b = _date.fromisoformat(session_date), _date.fromisoformat(new_date)
+        except ValueError:
+            return "Not sent: session_date and new_date must both be YYYY-MM-DD."
+        kind, payload = "move", {"from": a.isoformat(), "to": b.isoformat()}
+        proposal = f"{proposal} [move {a:%A %d %b} -> {b:%A %d %b}]"
     with _write(r["runner_id"]) as conn:
-        aid = queries.create_approval(conn, r["runner_id"], reason, proposal)
-    hermes.notify_coach(f"Approval needed [{aid}] for {r['name']}\nWhy: {reason}\nProposal: {proposal}")
+        aid = queries.create_approval(conn, r["runner_id"], reason, proposal, kind, payload)
+    hermes.notify_coach(f"Approval needed [{aid}] for {r['name']}\nWhy: {reason}\nProposal: {proposal}\n"
+                        f"Reply approve {aid} or reject {aid}.")
     return f"Sent to your coach for approval (request {aid})."
 
 
@@ -519,6 +532,33 @@ def coach_pending_approvals(ctx: Context) -> list[dict]:
             " JOIN runners r ON r.runner_id=a.runner_id WHERE a.status='pending' ORDER BY a.created")]
 
 
+def _apply_move(conn, approval: dict) -> dict | None:
+    """Apply an approved 'move' request to the programme and the watch calendar."""
+    if approval.get("kind") != "move" or not approval.get("payload"):
+        return None
+    import json as _json
+    p = _json.loads(approval["payload"])
+    try:
+        res = plans.move_session(conn, approval["runner_id"], p["from"], p["to"],
+                                 note=f"approved request {approval['id']}")
+    except plans.PlanChangeError as e:
+        return {"error": str(e)}
+    _resync_calendar(conn, approval["runner_id"], p["from"], p["to"])
+    return res
+
+
+def _resync_calendar(conn, rid: int, *days: str) -> None:
+    """If the person's programme is on their Intervals.icu calendar, send the change there too."""
+    if not conn.execute("SELECT 1 FROM intervals_links WHERE runner_id=?", (rid,)).fetchone():
+        return
+    try:
+        start = min(_date.fromisoformat(d) for d in days)
+        span = (max(_date.fromisoformat(d) for d in days) - start).days + 1
+        intervals.push(conn, rid, start=start, days=span)
+    except Exception:
+        log.exception("calendar update for runner %s failed", rid)
+
+
 def _deliver_in_background(runner: dict, prompt: str, label: str) -> None:
     """Start a turn in the runner's profile on a background thread and deliver the reply.
 
@@ -574,10 +614,20 @@ def coach_decide(ctx: Context, approval_id: str, decision: str, note: str = "") 
             return f"Recorded: {decision}. Runner row is gone; nothing to notify."
         runner = dict(found)  # detach: the connection closes with this block
         proposal = row["proposal"]
+        applied = None
         if decision == "approved":
             onboarding.apply_zones(conn, row)
+            applied = _apply_move(conn, row)
     record.schedule_export(runner["runner_id"])
+    if applied and applied.get("error"):
+        note = (note + " " if note else "") + f"(The programme could not be updated: {applied['error']})"
+    elif applied:
+        note = (note + " " if note else "") + f"(Programme updated: moved to {applied['to']}.)"
     _deliver_decision(runner, decision, proposal, note)
+    if applied:
+        return (f"Recorded: {decision}. " + (f"Programme NOT updated: {applied['error']}" if applied.get("error")
+                else f"Programme updated: {applied['moved']} moved from {applied['from']} to {applied['to']}.")
+                + " Runner notified.")
     return f"Recorded: {decision}. Runner notified."
 
 
@@ -621,6 +671,50 @@ def coach_reply(ctx: Context, message: str, alert_id: int = 0) -> str:
     )
     _deliver_in_background(runner, prompt, "coach-reply")
     return f"Sent to {runner['name']} (alert #{row['id']} closed)."
+
+
+def _coach_runner(conn, name: str):
+    rows_ = conn.execute("SELECT * FROM runners WHERE active=1 AND lower(name) LIKE ?",
+                         (f"%{(name or '').strip().lower()}%",)).fetchall()
+    if len(rows_) != 1:
+        names = ", ".join(r["name"] for r in conn.execute("SELECT name FROM runners WHERE active=1"))
+        raise ValueError(f"say which runner: {names}")
+    return rows_[0]
+
+
+@mcp.tool()
+def coach_runner_plan(ctx: Context, runner: str, days: int = 14) -> dict:
+    """Coach only: a runner's programme sessions from 3 days ago to `days` ahead, with weekday,
+    status and targets. `runner` is their name."""
+    _require_coach(ctx)
+    with session() as conn:
+        try:
+            r = _coach_runner(conn, runner)
+        except ValueError as e:
+            return {"error": str(e)}
+        out = queries.current_plan(conn, r["runner_id"], max(1, min(days, 90)))
+        for w in out["workouts"]:
+            w["weekday"] = _date.fromisoformat(w["date"]).strftime("%A")
+        return {"runner": r["name"], **out}
+
+
+@mcp.tool()
+def coach_move_session(ctx: Context, runner: str, from_date: str, to_date: str) -> str:
+    """Coach only: move one of a runner's programme sessions to another day (YYYY-MM-DD).
+    Updates their programme and their watch calendar, and tells the runner."""
+    _require_coach(ctx)
+    with session() as conn:
+        try:
+            r = dict(_coach_runner(conn, runner))
+            res = plans.move_session(conn, r["runner_id"], from_date, to_date, note="moved by Coach Andy")
+        except (ValueError, plans.PlanChangeError) as e:
+            return f"Not moved: {e}"
+        _resync_calendar(conn, r["runner_id"], from_date, to_date)
+    record.schedule_export(r["runner_id"])
+    extra = f" Also on that day: {'; '.join(res['also_on_that_day'])}." if res["also_on_that_day"] else ""
+    _deliver_in_background(r, f"Coach Andy has moved your session \"{res['moved']}\" from {res['from']} to "
+                           f"{res['to']}. Tell the runner briefly, with the new day.", "coach-move")
+    return f"Moved {res['moved']} from {res['from']} to {res['to']}.{extra} Runner notified."
 
 
 @mcp.tool()

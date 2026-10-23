@@ -408,10 +408,11 @@ def current_plan(conn, rid: int, days: int = 14) -> dict:
     return {"workouts": out}
 
 
-def create_approval(conn, rid: int, reason: str, proposal: str) -> str:
+def create_approval(conn, rid: int, reason: str, proposal: str, kind: str = "plan",
+                    payload: dict | None = None) -> str:
     aid = secrets.token_urlsafe(9)
-    conn.execute("INSERT INTO approvals (id, runner_id, reason, proposal) VALUES (?,?,?,?)",
-                 (aid, rid, reason[:500], proposal[:2000]))
+    conn.execute("INSERT INTO approvals (id, runner_id, reason, proposal, kind, payload) VALUES (?,?,?,?,?,?)",
+                 (aid, rid, reason[:500], proposal[:2000], kind, json.dumps(payload) if payload else None))
     conn.commit()
     return aid
 
