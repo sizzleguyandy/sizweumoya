@@ -295,7 +295,61 @@ def last_strength_session(conn, rid: int) -> dict | None:
         "SELECT exercise, set_no, reps, weight_kg, duration_s FROM strength_sets WHERE session_id=? ORDER BY id",
         (s["id"],),
     ))
+    bests = {r[0]: r[1] for r in conn.execute(
+        "SELECT t.exercise, MAX(t.weight_kg) FROM strength_sets t JOIN strength_sessions x ON x.id=t.session_id"
+        " WHERE t.runner_id=? AND x.date<? AND t.weight_kg>0 GROUP BY t.exercise", (rid, s["date"]))}
+    out["card"] = session_card(out, bests)
     return out
+
+
+def _kg(w) -> str:
+    return f"{w:g} kg" if w else "BW"
+
+
+def _set_text(st: dict) -> str:
+    if st["reps"] is not None:
+        return str(st["reps"])
+    if st["duration_s"]:
+        return f"{st['duration_s']}s"
+    return "-"
+
+
+NAME_WIDTH = 24
+
+
+def session_card(session: dict, previous_best: dict | None = None) -> str:
+    """The aligned summary at the top of a strength debrief, built here so every number is
+    the system's. One line per exercise: name, weight, reps per set. A weight above the
+    person's previous best for that lift is marked "new best"."""
+    previous_best = previous_best or {}
+    order: list[str] = []
+    by_ex: dict[str, list[dict]] = {}
+    for st in session["sets"]:
+        if st["exercise"] not in by_ex:
+            order.append(st["exercise"])
+        by_ex.setdefault(st["exercise"], []).append(st)
+    d = date.fromisoformat(session["date"])
+    total = len(session["sets"])
+    head = f"GYM  {d:%a} {d.day} {d:%b}  ·  {len(order)} exercise{'s' if len(order) != 1 else ''}  ·  {total} sets"
+    if session.get("duration_s"):
+        h, m = divmod(round(session["duration_s"] / 60), 60)
+        head += f"  ·  {h}:{m:02d}" if h else f"  ·  {m} min"
+    lines = [head, ""]
+    for ex in order:
+        sets = by_ex[ex]
+        name = ex[:1].upper() + ex[1:]
+        name = name if len(name) <= NAME_WIDTH else name[:NAME_WIDTH - 1] + "."
+        weights = {st["weight_kg"] or 0 for st in sets}
+        if len(weights) == 1:
+            detail = f"{_kg(sets[0]['weight_kg']):>8}  " + " ".join(_set_text(st) for st in sets)
+        else:  # weight changed between sets: show each as reps x weight
+            detail = "  ".join(f"{_set_text(st)}x{st['weight_kg'] or 0:g}" for st in sets)
+            detail = f"{'':>8}  {detail}"
+        top = max(weights)
+        if top and ex in previous_best and top > (previous_best[ex] or 0):
+            detail += "  new best"
+        lines.append(f"{name:<{NAME_WIDTH}}{detail}")
+    return "\n".join(lines)
 
 
 def recent_tips(conn, rid: int, n: int = 5) -> list[dict]:

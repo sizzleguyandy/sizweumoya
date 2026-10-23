@@ -136,3 +136,16 @@ def test_week_card(db):
     assert "of 33 km planned" in week_card(w2, MON, today=TODAY) and "2/4 sessions done" in week_card(w2, MON, today=TODAY)
     lifter = week_card({"focus": "strength", "strength_sessions": 2}, MON, today=TODAY)
     assert "Run" not in lifter and "Strength  2 sessions" in lifter
+
+
+def test_session_card_lines_up_and_marks_new_bests():
+    from app.queries import session_card
+    s = {"date": "2026-10-21", "duration_s": 3900, "sets":
+         [dict(exercise="chest press (machine)", reps=r, weight_kg=35, duration_s=None) for r in (5, 5, 7)]
+         + [dict(exercise="squat", reps=5, weight_kg=w, duration_s=None) for w in (60, 70)]
+         + [dict(exercise="plank", reps=None, weight_kg=None, duration_s=45)]}
+    lines = session_card(s, {"squat": 65, "chest press (machine)": 35}).splitlines()
+    assert lines[0] == "GYM  Wed 21 Oct  ·  3 exercises  ·  6 sets  ·  1:05"
+    assert lines[2] == "Chest press (machine)      35 kg  5 5 7"
+    assert lines[3].endswith("5x60  5x70  new best")
+    assert lines[4] == "Plank                         BW  45s"
