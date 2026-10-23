@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 # table -> how its rows belong to a runner (all carry runner_id).
 TABLES = ("runners", "runs", "run_splits", "strength_sessions", "strength_sets", "messages",
           "weekly_summary", "fitness_checks", "tips_given", "coach_notes", "runner_summary",
-          "races", "plans", "planned_workouts", "approvals", "coach_alerts")
+          "races", "plans", "planned_workouts", "approvals", "coach_alerts", "wellness")
 SECRET_COLUMNS = {"runners": {"mcp_token_hash", "hermes_api_key"}}
 
 # What get_record can return. Each: (SQL after FROM/WHERE runner_id, date column, default order).
@@ -155,7 +155,7 @@ def _schema_without_fk() -> str:
     text = SCHEMA.read_text().partition("CREATE INDEX")[0]
     # Secrets are left out of the copy, so their columns must accept NULL there, and tables
     # that only hold connection secrets are not created at all.
-    text = re.sub(r"(--[^\n]*\n)*CREATE TABLE IF NOT EXISTS (hevy|garmin)_links \(.*?\);\n", "", text, flags=re.S)
+    text = re.sub(r"(--[^\n]*\n)*CREATE TABLE IF NOT EXISTS (hevy|garmin|intervals)_links \(.*?\);\n", "", text, flags=re.S)
     return text.replace("mcp_token_hash    TEXT NOT NULL", "mcp_token_hash    TEXT")
 
 

@@ -282,6 +282,23 @@ def get_my_paces_and_zones(ctx: Context) -> dict:
 
 
 @mcp.tool()
+def get_my_wellness(ctx: Context, days: int = 14) -> dict:
+    """Daily wellness from the person's watch (via Intervals.icu): resting heart rate, HRV, sleep
+    and weight, newest first, with 7-day averages. Rising resting HR or falling HRV over several
+    days alongside heavy training is a recovery flag; one odd day is not."""
+    with session() as conn:
+        rid = _rid(ctx)
+        rows_ = [dict(r) for r in conn.execute(
+            "SELECT date, resting_hr, hrv, sleep_s, sleep_score, weight_kg FROM wellness WHERE runner_id=?"
+            " ORDER BY date DESC LIMIT ?", (rid, max(1, min(days, 90))))]
+    def avg(k, n=7):
+        v = [r[k] for r in rows_[:n] if r[k]]
+        return round(sum(v) / len(v), 1) if v else None
+    return {"days": rows_, "avg_7d": {"resting_hr": avg("resting_hr"), "hrv": avg("hrv"),
+                                      "sleep_h": round(avg("sleep_s") / 3600, 1) if avg("sleep_s") else None}}
+
+
+@mcp.tool()
 def get_my_races(ctx: Context) -> list[dict]:
     """Upcoming races: name, date, distance, climb, notes and days to go."""
     with session() as conn:

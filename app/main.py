@@ -12,7 +12,7 @@ from datetime import date
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
-from . import garmin, hermes, hevy, plans, queries, record, trends
+from . import garmin, hermes, hevy, intervals, plans, queries, record, trends
 from .config import settings
 from .db import connect, init_db, session
 
@@ -291,6 +291,39 @@ def job_records(request: Request):
         for rid in ids:
             record.export_runner(conn, rid)
     return {"records": len(ids)}
+
+
+@app.post("/jobs/intervals-sync")
+def job_intervals_sync(request: Request, tasks: BackgroundTasks):
+    """Hourly (at an odd minute): new activities and wellness from Intervals.icu."""
+    _check_jobs_token(request)
+    with session() as conn:
+        links = [dict(r) for r in conn.execute("SELECT * FROM intervals_links")]
+    tasks.add_task(_intervals_sync, links)
+    return {"queued": len(links)}
+
+
+def _intervals_sync(links: list[dict]) -> None:
+    from datetime import timedelta
+    for link in links:
+        rid = link["runner_id"]
+        try:
+            with session() as conn:
+                res = intervals.pull_activities(conn, rid, date.today() - timedelta(days=3))
+                intervals.pull_wellness(conn, rid, date.today() - timedelta(days=7))
+                runner = dict(conn.execute("SELECT * FROM runners WHERE runner_id=?", (rid,)).fetchone())
+            record.schedule_export(rid)
+            if not (settings.intervals_ai_allowed and runner.get("onboarded_at") and runner.get("hermes_api_key")):
+                continue
+            for a in res["stored"]:
+                if a["kind"] == "run" and not a.get("short"):
+                    hermes.run_and_deliver(runner, f"A run just synced ({a['date']}, {a['distance_km']} km). "
+                                           "Give the run debrief as usual, then save_report.", kind="debrief")
+                elif a["kind"] == "strength":
+                    hermes.run_and_deliver(runner, f"A strength session just synced ({a['date']}). Give the "
+                                           "strength debrief as usual, then save_report.", kind="strength_debrief")
+        except Exception:
+            log.exception("Intervals.icu sync failed for runner %s", rid)
 
 
 @app.post("/jobs/quiet-runners")

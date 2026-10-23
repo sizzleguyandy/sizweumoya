@@ -2,9 +2,9 @@
 
 One row per session:
 
-  date,type,description,km,kind,hr_low,hr_high,exercises
+  date,type,description,km,kind,hr_low,hr_high,exercises,steps
   2026-11-03,run,Easy run,5,easy,,144,
-  2026-11-05,run,Hill reps 6x90s,7,workout,160,175,
+  2026-11-05,run,Hill reps 6x90s,7,workout,160,175,,"- 15m Z2 HR|6x|- 90s Z4 HR|- 90s Z1 HR|- 10m Z2 HR"
   2026-11-04,strength,Lower body A,,,,,"Squat 4x6 70kg; RDL 3x8 60kg; Calf raise 3x15"
 
 type: run or strength. kind (runs): easy, long, workout, benchmark, race. Empty cells are fine.
@@ -43,6 +43,9 @@ def load_csv(conn, rid: int, path: str, replace: bool = False) -> dict:
             target["hr_range"] = [int(r["hr_low"]), int(r["hr_high"])]
         elif r.get("hr_high"):
             target["hr_max"] = int(r["hr_high"])
+        if r.get("steps"):
+            # Structured workout for the watch, in Intervals.icu's workout text; "|" starts a new line.
+            target["steps"] = "\n".join(x.strip() for x in r["steps"].split("|") if x.strip())
         if r.get("exercises"):
             target["exercises"] = [e.strip() for e in r["exercises"].split(";") if e.strip()]
         by_type.setdefault(t, []).append({"date": d.isoformat(), "description": r["description"][:300],

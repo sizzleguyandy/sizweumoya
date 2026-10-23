@@ -14,6 +14,9 @@
   python -m app.admin load-programme --runner 2 --file programme.csv [--replace]
   python -m app.admin export-record --runner 2 [--to path.db]
   python -m app.admin offboard --runner 2 [--keep-copy path.db]
+  INTERVALS_API_KEY=... python -m app.admin intervals-connect --runner 1 --athlete-id i12345
+  python -m app.admin intervals-push --runner 1 [--days 28] [--dry-run]
+  python -m app.admin intervals-pull --runner 1 --since 2026-10-01
   python -m app.admin garmin-link --runner 1 --user-id <Garmin userId>
   HEVY_API_KEY=... python -m app.admin hevy-connect --runner 1
   python -m app.admin hevy-import --runner 1 --since 2026-08-01
@@ -22,7 +25,7 @@
 import argparse
 import json
 
-from . import garmin, hermes, hevy, keyboard, onboarding, programme, record, stats, tracker_import
+from . import garmin, hermes, intervals, hevy, keyboard, onboarding, programme, record, stats, tracker_import
 from .config import settings
 from .db import connect, init_db
 from .identity import hash_token, new_token
@@ -86,6 +89,16 @@ def main() -> None:
     z.add_argument("--zones", required=True, help="upper bounds of Z1-Z4, e.g. 132,144,152,162")
     z.add_argument("--max-hr", type=int)
     z.add_argument("--easy-cap", type=int)
+    ic = sub.add_parser("intervals-connect", help="link Intervals.icu (key read from INTERVALS_API_KEY)")
+    ic.add_argument("--runner", type=int, required=True)
+    ic.add_argument("--athlete-id", required=True)
+    ip = sub.add_parser("intervals-push", help="send upcoming programme sessions to the Intervals.icu calendar")
+    ip.add_argument("--runner", type=int, required=True)
+    ip.add_argument("--days", type=int, default=28)
+    ip.add_argument("--dry-run", action="store_true", help="show what would be sent, send nothing")
+    il = sub.add_parser("intervals-pull", help="import activities and wellness from Intervals.icu")
+    il.add_argument("--runner", type=int, required=True)
+    il.add_argument("--since", required=True)
     gl = sub.add_parser("garmin-link", help="link a person to their Garmin userId (for testing with the "
                                             "User Authorization tool, before the OAuth flow exists)")
     gl.add_argument("--runner", type=int, required=True)
@@ -169,6 +182,28 @@ def main() -> None:
         print(dict(conn.execute("SELECT name, hr_zones, max_hr, easy_hr_cap, zones_locked FROM runners"
                                 " WHERE runner_id=?", (args.runner,)).fetchone()))
         print("Applies to runs stored from now on. Runs already stored keep their zone times.")
+    elif args.cmd == "intervals-connect":
+        import os
+        key = os.environ.get("INTERVALS_API_KEY", "")
+        if not key:
+            raise SystemExit("Set INTERVALS_API_KEY in the environment first (never on the command line).")
+        intervals.connect(conn, args.runner, args.athlete_id, key)
+        print(f"Runner {args.runner} linked to Intervals.icu athlete {args.athlete_id}.")
+    elif args.cmd == "intervals-push":
+        res = intervals.push(conn, args.runner, days=args.days, dry_run=args.dry_run)
+        if args.dry_run:
+            for e in res["events"]:
+                print(f"--- {e['start_date_local'][:10]}  {e['category']}  {e['name']}\n{e['description']}\n")
+            print(f"{len(res['events'])} sessions would be sent.")
+        else:
+            print(res)
+    elif args.cmd == "intervals-pull":
+        from datetime import date as _d
+        since = _d.fromisoformat(args.since)
+        res = intervals.pull_activities(conn, args.runner, since)
+        print("activities:", res["counts"])
+        print("wellness days:", intervals.pull_wellness(conn, args.runner, since))
+        record.export_runner(conn, args.runner)
     elif args.cmd == "garmin-link":
         garmin.link(conn, args.runner, args.user_id)
         print(f"Runner {args.runner} linked to Garmin user {args.user_id}.")

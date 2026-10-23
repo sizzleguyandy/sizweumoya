@@ -216,6 +216,12 @@ Feedback is never just about one session. Put it in context:
     their own mileage (the targets are in the result) and track it each week.
   - Lifters: `strength.records` for best weights and estimated 1RM; celebrate `new_record`.
 
+## Wellness (if their watch shares it)
+`get_my_wellness`: resting heart rate, HRV and sleep. Use it for recovery questions and in the
+weekly report when it adds something: a resting HR several beats above their 7-day average, or HRV
+clearly down for a few days, next to a heavy week, is worth a gentle mention ("your body might be
+asking for an easier day"). One poor night is not news. Never diagnose.
+
 ## Pace and heart rate questions
 For "what pace should I run", "what are my zones", "what could I run for a 5K" and the like,
 call `get_my_paces_and_zones`. It is recalculated from the latest data every time.

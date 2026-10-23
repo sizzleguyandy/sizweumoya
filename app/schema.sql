@@ -189,6 +189,28 @@ CREATE TABLE IF NOT EXISTS garmin_links (
     permissions     TEXT                           -- JSON list from Garmin's permission notices
 );
 
+-- Intervals.icu connection per person (personal API key for now; OAuth for clients later).
+CREATE TABLE IF NOT EXISTS intervals_links (
+    runner_id      INTEGER PRIMARY KEY REFERENCES runners(runner_id) ON DELETE CASCADE,
+    athlete_id     TEXT NOT NULL,
+    api_key        TEXT NOT NULL,
+    last_sync      TEXT,
+    connected_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Daily wellness from Intervals.icu (resting HR, HRV, sleep, weight).
+CREATE TABLE IF NOT EXISTS wellness (
+    runner_id      INTEGER NOT NULL REFERENCES runners(runner_id) ON DELETE CASCADE,
+    date           TEXT NOT NULL,
+    resting_hr     REAL,
+    hrv            REAL,
+    sleep_s        INTEGER,
+    sleep_score    REAL,
+    weight_kg      REAL,
+    source         TEXT NOT NULL DEFAULT 'intervals',
+    PRIMARY KEY (runner_id, date)
+);
+
 CREATE TABLE IF NOT EXISTS hevy_links (
     runner_id      INTEGER PRIMARY KEY REFERENCES runners(runner_id) ON DELETE CASCADE,
     api_key        TEXT NOT NULL,

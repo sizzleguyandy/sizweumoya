@@ -29,6 +29,10 @@ class Settings:
     # from Garmin are stored but Sarah is not asked to comment on them automatically.
     garmin_ai_allowed: bool = field(default_factory=lambda: _env("GARMIN_AI_ALLOWED", "0") == "1")
 
+    intervals_base_url: str = field(default_factory=lambda: _env("INTERVALS_BASE_URL", "https://intervals.icu"))
+    # Automatic debriefs for activities pulled from Intervals.icu: off until its API terms are checked.
+    intervals_ai_allowed: bool = field(default_factory=lambda: _env("INTERVALS_AI_ALLOWED", "0") == "1")
+
     hevy_base_url: str = field(default_factory=lambda: _env("HEVY_BASE_URL", "https://api.hevyapp.com"))
 
     hermes_home: str = field(default_factory=lambda: _env("HERMES_HOME", ""))
