@@ -104,3 +104,10 @@ def test_long_run_with_faster_parts_is_not_sent_as_all_easy(db):
     ev = [e for e in intervals.push(c, rid, dry_run=True)["events"] if "Hilly" in e["name"]][0]
     assert "- 16km Z2 HR" not in ev["description"]
     assert "Easy running: under 144 bpm" in ev["description"] and "Faster parts: 152-163 bpm" in ev["description"]
+
+
+def test_short_titles():
+    assert intervals.short_name("LONG HILL REPS — 15min wu + 4 x 3min climbs") == "LONG HILL REPS"
+    assert intervals.short_name("Hilly. Last 20min @ HM effort") == "Hilly"
+    assert intervals.short_name("Easy run") == "Easy run"
+    assert len(intervals.short_name("x" * 80)) == 40

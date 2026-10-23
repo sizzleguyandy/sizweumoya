@@ -61,6 +61,13 @@ def _hr_zone_text(target: dict) -> str:
     return "Z2 HR" if target.get("kind") in ("easy", "long") else ""
 
 
+def short_name(description: str, limit: int = 40) -> str:
+    """The session's short title for the watch: the text before the first dash or full stop."""
+    import re
+    head = re.split(r"\s+[—–-]\s+|\.\s", description or "", maxsplit=1)[0].strip() or "Session"
+    return head if len(head) <= limit else head[:limit - 1].rstrip() + "…"
+
+
 def to_event(w, runner) -> dict:
     """One planned session as an Intervals.icu calendar event."""
     import json
@@ -90,7 +97,7 @@ def to_event(w, runner) -> dict:
     return {"category": "WORKOUT" if steps or is_run else "NOTE",
             "start_date_local": f"{w['date']}T00:00:00",
             "type": "Run" if is_run else "WeightTraining",
-            "name": (w["description"][:60] or "Session"),
+            "name": short_name(w["description"]),
             "description": description,
             "external_id": f"sizwe-{w['id']}"}
 
