@@ -98,9 +98,11 @@ def submit_activity_file(ctx: Context, file_path: str, note: str = "") -> dict:
 
 @mcp.tool()
 def log_workout(ctx: Context, text: str, date: str = "") -> dict:
-    """Store a strength workout the runner typed, one exercise per line, e.g.
-    "Squat 3x8 60kg; RDL 3x10 50kg; Plank 3x45s". `date` is YYYY-MM-DD (default today).
-    Returns how many sets were understood and any lines that weren't."""
+    """Store a strength workout the person typed or pasted. Pass their text EXACTLY as they sent
+    it, never rewritten or summarised: the parser reads "Squat 3x8 60kg", "Press 3x10 + 2x7 30kg",
+    "Plank 3x45s" and Hevy's shared workout text ("Set 1: 60 kg x 5" lines) itself.
+    `date` is YYYY-MM-DD (default today). Returns how many sets were stored and any lines it
+    didn't understand; ask about those lines rather than guessing."""
     when = date or _date.today().isoformat()
     try:
         _date.fromisoformat(when)

@@ -413,3 +413,68 @@ def test_purge_strava_leaves_everything_else(tmp_path, monkeypatch):
     assert out.returncode == 0, out.stderr
     c = connect(str(dbp))
     assert [r[0] for r in c.execute("SELECT activity_key FROM runs")] == ["fit:abc"]
+
+
+HEVY_SHARE = """Afternoon workout 💪
+Friday, Oct 23, 2026 at 12:36pm
+
+Sumo Deadlift
+Set 1: 60 kg x 5
+Set 2: 90 kg x 5
+Set 3: 90 kg x 5
+Set 4: 90 kg x 5
+
+Shoulder Press (Machine Plates)
+Set 1: 30 kg x 10
+Set 2: 30 kg x 10
+Set 3: 30 kg x 10
+Set 4: 30 kg x 7
+Set 5: 30 kg x 7
+
+Triceps Extension (Machine)
+Set 1: 50 kg x 8
+Set 2: 50 kg x 8
+Set 3: 50 kg x 8
+Set 4: 50 kg x 8
+
+Bicep Curl (Machine)
+Set 1: 30 kg x 10
+Set 2: 30 kg x 10
+Set 3: 30 kg x 10
+
+Lateral Raise (Cable)
+Set 1: 5 kg x 8
+Set 2: 5 kg x 8
+Set 3: 5 kg x 8
+
+Triceps Extension (Cable)
+Set 1: 23 kg x 10
+Set 2: 23 kg x 10
+Set 3: 23 kg x 10
+
+@hevyapp
+https://hevy.com/workout/OrKJRBEijwm"""
+
+
+def test_hevy_shared_text_is_read_set_by_set():
+    sets, unparsed = workout_text.parse(HEVY_SHARE)
+    assert unparsed == []
+    assert len(sets) == 22
+    dl = [(s.weight_kg, s.reps) for s in sets if s.exercise == "sumo deadlift"]
+    assert dl == [(60.0, 5), (90.0, 5), (90.0, 5), (90.0, 5)]
+    sp = [s.reps for s in sets if s.exercise == "shoulder press (machine plates)"]
+    assert sp == [10, 10, 10, 7, 7] and [s.set_no for s in sets if s.exercise == "sumo deadlift"] == [1, 2, 3, 4]
+
+
+def test_changing_reps_on_one_line():
+    sets, unparsed = workout_text.parse("Shoulder press 3x10 + 2x7 30kg\nPlank 2x45s")
+    assert unparsed == []
+    assert [(s.reps, s.weight_kg) for s in sets[:5]] == [(10, 30.0)] * 3 + [(7, 30.0)] * 2
+    assert sets[-1].duration_s == 45
+    sets, _ = workout_text.parse("Squat 1x5 60kg, 3x5 90kg")
+    assert [s.weight_kg for s in sets] == [60.0, 90.0, 90.0, 90.0]
+
+
+def test_unknown_lines_are_reported_not_guessed():
+    sets, unparsed = workout_text.parse("Squat 3x5 80kg\nHeavy day, felt great!\nSet 1: 50 kg x 5")
+    assert len(sets) == 3 and "Heavy day, felt great!" in unparsed and "Set 1: 50 kg x 5" in unparsed
