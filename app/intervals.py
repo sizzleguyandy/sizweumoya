@@ -121,6 +121,34 @@ def push(conn, rid: int, start: date | None = None, days: int = 28, dry_run: boo
     return {"pushed": len(events), "response_items": len(r.json()) if r.content else 0}
 
 
+EXT_PREFIX = "sizwe-"
+
+
+def reconcile(conn, rid: int, days: int = 28) -> dict:
+    """Make the Intervals.icu calendar match the programme for the next `days` days: send every
+    open session (new, moved or edited ones are updated in place), and remove calendar entries we
+    created whose session no longer exists or whose programme was replaced. Completed sessions and
+    anything the person added themselves are never touched."""
+    start, end = date.today(), date.today() + timedelta(days=days)
+    sent = push(conn, rid, start=start, days=days)
+    link = link_for(conn, rid)
+    removed = 0
+    with _client(link) as c:
+        events = _check(c.get(f"/athlete/{link['athlete_id']}/events",
+                              params={"oldest": start.isoformat(), "newest": end.isoformat()})).json()
+        for e in events:
+            ext = str(e.get("external_id") or "")
+            if not ext.startswith(EXT_PREFIX) or not ext[len(EXT_PREFIX):].isdigit():
+                continue
+            w = conn.execute(
+                "SELECT w.status, p.active FROM planned_workouts w JOIN plans p ON p.id=w.plan_id"
+                " WHERE w.id=? AND w.runner_id=?", (int(ext[len(EXT_PREFIX):]), rid)).fetchone()
+            if w is None or not w["active"]:
+                _check(c.delete(f"/athlete/{link['athlete_id']}/events/{e['id']}"))
+                removed += 1
+    return {"sent": sent.get("pushed", 0), "removed": removed}
+
+
 # ---- pull: activities and wellness ----------------------------------------------------
 
 def from_strava(activity: dict) -> bool:

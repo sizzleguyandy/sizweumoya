@@ -118,3 +118,31 @@ def test_anything_from_strava_is_recognised():
     assert intervals.from_strava({"source": "OAUTH_CLIENT", "strava_id": 123})
     assert intervals.from_strava({"_note": "STRAVA activities are not available via the API"})
     assert not intervals.from_strava({"source": "OAUTH_CLIENT", "device_name": "Amazfit Balance 2"})
+
+
+def test_reconcile_updates_and_removes_only_our_stale_entries(db, monkeypatch):
+    c, rid = db
+    ids = [r[0] for r in c.execute("SELECT id FROM planned_workouts ORDER BY date")]
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.method == "POST":
+            return httpx.Response(200, json=[])
+        if req.method == "GET":
+            return httpx.Response(200, json=[
+                {"id": 11, "external_id": f"sizwe-{ids[0]}"},        # still in the programme: keep
+                {"id": 12, "external_id": "sizwe-999999"},            # session no longer exists: remove
+                {"id": 13, "external_id": None},                      # added by the person: never touch
+                {"id": 14, "external_id": "someone-else-7"}])
+        return httpx.Response(200, json={})
+    mock(monkeypatch, handler)
+    res = intervals.reconcile(c, rid)
+    assert res == {"sent": 3, "removed": 1}
+    assert ("DELETE", "/api/v1/athlete/i12345/events/12") in calls
+    assert not any(m == "DELETE" and p.endswith(("/11", "/13", "/14")) for m, p in calls)
+    # a replaced programme: its entries go
+    c.execute("UPDATE plans SET active=0")
+    c.commit()
+    calls.clear()
+    assert intervals.reconcile(c, rid)["removed"] == 2

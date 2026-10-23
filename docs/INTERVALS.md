@@ -29,3 +29,10 @@ python -m app.admin intervals-pull --runner 1 --since 2026-10-01
 Then schedule `POST /jobs/intervals-sync` hourly at an odd minute (e.g. :17).
 Automatic debriefs for pulled activities stay off (`INTERVALS_AI_ALLOWED=0`) until the
 Intervals.icu API terms have been checked.
+
+## Keeping the calendar in step
+Every programme change (a move approved by Coach Andy, `coach_move_session`, `move-session`,
+`set-steps`, `load-programme`, `import-tracker`) updates the Intervals.icu calendar straight away,
+and the hourly `/jobs/intervals-sync` does it again as a safety net. Entries we created whose
+session was removed or whose programme was replaced are deleted; completed sessions and anything
+the person added themselves are never touched.

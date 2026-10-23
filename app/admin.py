@@ -219,6 +219,7 @@ def main() -> None:
         conn.execute("UPDATE planned_workouts SET target=? WHERE id=?", (json.dumps(t), rows_[0]["id"]))
         conn.commit()
         print(f"{args.date} {rows_[0]['description'][:50]}\n{t['steps']}")
+        _calendar(conn, args.runner)
     elif args.cmd == "intervals-pull":
         from datetime import date as _d
         since = _d.fromisoformat(args.since)
@@ -273,10 +274,7 @@ def main() -> None:
         except plans.PlanChangeError as e:
             raise SystemExit(str(e))
         print(res)
-        if conn.execute("SELECT 1 FROM intervals_links WHERE runner_id=?", (args.runner,)).fetchone():
-            from datetime import date as _d
-            a, b = sorted([_d.fromisoformat(args.from_date), _d.fromisoformat(args.to_date)])
-            print("calendar:", intervals.push(conn, args.runner, start=a, days=(b - a).days + 1))
+        _calendar(conn, args.runner)
         record.export_runner(conn, args.runner)
     elif args.cmd == "purge-strava":
         out = {}
@@ -300,6 +298,7 @@ def main() -> None:
             tracker_import.reset_runner(conn, args.runner)
             runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (args.runner,)).fetchone()
         print(json.dumps(tracker_import.import_workbook(conn, runner, args.file), indent=2))
+        _calendar(conn, args.runner)
 
     elif args.cmd == "set-focus":
         onboarding.set_focus(conn, args.runner, args.focus)
@@ -319,6 +318,7 @@ def main() -> None:
         print("Welcome sent:\n" + text)
     elif args.cmd == "load-programme":
         print(json.dumps(programme.load_csv(conn, args.runner, args.file, replace=args.replace), indent=2))
+        _calendar(conn, args.runner)
         record.export_runner(conn, args.runner)
     elif args.cmd == "export-record":
         print(record.export_runner(conn, args.runner, args.to))
@@ -334,6 +334,16 @@ def main() -> None:
         print(f"Deleted {runner['name']} and everything held for them (record file included).")
         print(f"Now remove the Hermes profile {runner['hermes_profile']}, its route, and the chat ID from "
               "TELEGRAM_ALLOWED_USERS, then restart the gateway. Backups age out within 14 days.")
+
+
+def _calendar(conn, rid: int) -> None:
+    """After any programme change: bring the person's Intervals.icu calendar in line, if linked."""
+    if not conn.execute("SELECT 1 FROM intervals_links WHERE runner_id=?", (rid,)).fetchone():
+        return
+    try:
+        print("calendar:", intervals.reconcile(conn, rid))
+    except intervals.IntervalsError as e:
+        print(f"calendar NOT updated: {e} (the hourly sync will retry)")
 
 
 WELCOME_PROMPT = (

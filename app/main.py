@@ -295,7 +295,8 @@ def job_records(request: Request):
 
 @app.post("/jobs/intervals-sync")
 def job_intervals_sync(request: Request, tasks: BackgroundTasks):
-    """Hourly (at an odd minute): new activities and wellness from Intervals.icu."""
+    """Hourly (at an odd minute): new activities and wellness from Intervals.icu, and the
+    calendar brought in line with the programme."""
     _check_jobs_token(request)
     with session() as conn:
         links = [dict(r) for r in conn.execute("SELECT * FROM intervals_links")]
@@ -311,6 +312,7 @@ def _intervals_sync(links: list[dict]) -> None:
             with session() as conn:
                 res = intervals.pull_activities(conn, rid, date.today() - timedelta(days=3))
                 intervals.pull_wellness(conn, rid, date.today() - timedelta(days=7))
+                intervals.reconcile(conn, rid)   # calendar follows any programme change
                 runner = dict(conn.execute("SELECT * FROM runners WHERE runner_id=?", (rid,)).fetchone())
             record.schedule_export(rid)
             if not (settings.intervals_ai_allowed and runner.get("onboarded_at") and runner.get("hermes_api_key")):

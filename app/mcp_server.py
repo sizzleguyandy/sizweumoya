@@ -552,9 +552,7 @@ def _resync_calendar(conn, rid: int, *days: str) -> None:
     if not conn.execute("SELECT 1 FROM intervals_links WHERE runner_id=?", (rid,)).fetchone():
         return
     try:
-        start = min(_date.fromisoformat(d) for d in days)
-        span = (max(_date.fromisoformat(d) for d in days) - start).days + 1
-        intervals.push(conn, rid, start=start, days=span)
+        intervals.reconcile(conn, rid)
     except Exception:
         log.exception("calendar update for runner %s failed", rid)
 
