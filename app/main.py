@@ -111,6 +111,7 @@ async def hevy_webhook(request: Request, tasks: BackgroundTasks):
     with session() as conn:
         runner = hevy.runner_for_secret(conn, request.headers.get("authorization", ""))
     if runner is None:
+        log.warning("hevy webhook rejected: %s", hevy.describe(request.headers.get("authorization")))
         raise HTTPException(401)
     try:
         body = await request.json()

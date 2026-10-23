@@ -127,3 +127,16 @@ def test_reimport_cleans_typed_copies_added_after_the_sync(db):
     c.commit()
     res = hevy.store(c, r, WORKOUT)
     assert res["status"] == "duplicate" and c.execute("SELECT COUNT(*) FROM strength_sessions").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("sent", ["Bearer {s}", "{s}", "Bearer Bearer {s}", '"Bearer {s}"', "  bearer   {s} ",
+                                  "Bearer: {s}"])
+def test_header_accepted_however_it_was_pasted(db, sent):
+    c, rid = db
+    secret = hevy.connect(c, rid, "a-real-looking-hevy-api-key-0001")
+    assert hevy.runner_for_secret(c, sent.format(s=secret))["runner_id"] == rid
+
+
+def test_rejection_log_never_contains_the_secret():
+    d = hevy.describe("Bearer Bearer abcdefghijklmnopqrstuvwxyz")
+    assert "abcdefghij" not in d and "bearer_prefixes=2" in d and "token_len=26" in d

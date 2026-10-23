@@ -42,11 +42,27 @@ def connect(conn, rid: int, api_key: str) -> str:
     return secret
 
 
+def normalise(authorization: str | None) -> str:
+    """The secret from an Authorization value, however it was pasted into Hevy: with or without
+    "Bearer" (Hevy may add its own, giving "Bearer Bearer x"), quotes, or stray spaces."""
+    token = (authorization or "").strip().strip("'\"").strip()
+    while token.lower().startswith("bearer"):
+        token = token[6:].lstrip(" :").strip().strip("'\"").strip()
+    return token
+
+
+def describe(authorization: str | None) -> str:
+    """A safe description of a rejected header for the log: its shape, never its value."""
+    raw = authorization or ""
+    words = raw.split()
+    quotes = any(q in raw for q in ("'", '"'))
+    return (f"present={bool(raw)} words={len(words)} bearer_prefixes={raw.lower().count('bearer')} "
+            f"token_len={len(normalise(raw))} quotes={quotes}")
+
+
 def runner_for_secret(conn, authorization: str):
     """The person whose webhook secret this is, or None. Accepts "Bearer x" or "x"."""
-    token = (authorization or "").strip()
-    if token.lower().startswith("bearer "):
-        token = token[7:].strip()
+    token = normalise(authorization)
     if len(token) < 16:
         return None
     return conn.execute("SELECT r.*, h.api_key FROM hevy_links h JOIN runners r ON r.runner_id=h.runner_id"
