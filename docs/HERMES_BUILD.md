@@ -210,13 +210,23 @@ Install Hermes with the official Windows instructions
 
 ```powershell
 PS> hermes --version
-PS> hermes config set ANTHROPIC_API_KEY <ANTHROPIC_API_KEY>
-PS> hermes model                                   # choose Anthropic and a Claude model
+PS> hermes config set OPENROUTER_API_KEY <OPENROUTER_API_KEY>
+PS> hermes model                                   # choose OpenRouter and the DeepSeek Flash model
 PS> hermes config set timezone Africa/Johannesburg # your IANA zone
 PS> hermes doctor
 ```
 
 **Check:** `hermes chat -q "Say OK"` replies `OK`, and `hermes doctor` shows no errors.
+
+**The model is set per profile.** Every profile (default, `coach`, each `runner-N`) keeps its
+own `model:` block in its `config.yaml`, and a profile created later does not inherit a change
+made to another. All of them run on OpenRouter's DeepSeek Flash model; nothing in this system
+needs a Claude or other premium model. After creating a profile, or after any `hermes model`
+change, check every profile:
+
+```powershell
+PS> Get-ChildItem "$HH\config.yaml", "$HH\profiles\*\config.yaml" | Select-String -Pattern '^\s*(default|provider|model):' -Context 0,0
+```
 
 ---
 
