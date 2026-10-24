@@ -65,7 +65,7 @@ def get_my_profile(ctx: Context) -> dict:
     Read this first; it decides how you work with this person."""
     with session() as conn:
         rid = _rid(ctx)
-        return queries.profile(conn, rid) | {"coaching": plans.mode(conn, rid)}
+        return queries.profile(conn, rid) | {"coaching": plans.mode(conn, rid), "today_is": plans.today_info()}
 
 
 @mcp.tool()
@@ -137,7 +137,7 @@ def get_week_summary(ctx: Context) -> dict:
     time in each named HR zone, longest run and easy runs over the HR cap. In guided mode also
     `vs_programme`: planned vs actual km, sessions done/missed/to come, long run vs target."""
     with session() as conn:
-        return queries.week_summary(conn, _rid(ctx))
+        return {"today_is": plans.today_info(), **queries.week_summary(conn, _rid(ctx))}
 
 
 @mcp.tool()

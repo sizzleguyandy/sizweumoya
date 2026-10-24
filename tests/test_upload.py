@@ -339,7 +339,8 @@ def test_mode_follows_what_is_on_file(env):
     assert plans.mode(conn, rid, today) == {"focus": "running", "mode": "monitor", "running": "monitor",
                                             "strength": "monitor", "run_programme": None,
                                             "strength_programme": None}
-    assert plans.sessions_around(conn, rid, today) == {"mode": "monitor", "sessions": []}
+    s0 = plans.sessions_around(conn, rid, today)
+    assert s0["mode"] == "monitor" and s0["sessions"] == [] and s0["today_is"]["weekday"] == "Thursday"
     pid = conn.execute("INSERT INTO plans (runner_id, type, start_date, end_date) VALUES (?,?,?,?)",
                        (rid, "run", "2026-08-31", "2026-11-15")).lastrowid
     for d, desc, km in [("2026-10-20", "Easy run", 5), ("2026-10-22", "Hill reps", 7), ("2026-10-23", "Easy run", 5)]:
@@ -478,3 +479,10 @@ def test_changing_reps_on_one_line():
 def test_unknown_lines_are_reported_not_guessed():
     sets, unparsed = workout_text.parse("Squat 3x5 80kg\nHeavy day, felt great!\nSet 1: 50 kg x 5")
     assert len(sets) == 3 and "Heavy day, felt great!" in unparsed and "Set 1: 50 kg x 5" in unparsed
+
+
+def test_tools_state_today(env):
+    from app import plans
+    conn, runner, _, _ = env
+    s = plans.sessions_around(conn, runner["runner_id"], date(2026, 10, 24))
+    assert s["today_is"] == {"date": "2026-10-24", "weekday": "Saturday", "tomorrow": "Sunday 2026-10-25"}

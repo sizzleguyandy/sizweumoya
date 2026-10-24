@@ -107,6 +107,13 @@ def _active(conn, rid: int, type_: str, today: date):
 FOCUSES = ("running", "strength", "hybrid")
 
 
+def today_info(today: date | None = None) -> dict:
+    """Today's date as the server's clock has it, so the model never has to guess the day."""
+    today = today or date.today()
+    return {"date": today.isoformat(), "weekday": today.strftime("%A"),
+            "tomorrow": (today + timedelta(days=1)).strftime("%A %Y-%m-%d")}
+
+
 def mode(conn, rid: int, today: date | None = None) -> dict:
     """How Sarah works with this person, decided only by what is on file.
 
@@ -140,7 +147,7 @@ def sessions_around(conn, rid: int, today: date | None = None) -> dict:
     today = today or date.today()
     m = mode(conn, rid, today)
     if m["running"] != "guided" and m["strength"] != "guided":
-        return {"mode": "monitor", "sessions": []}
+        return {"today_is": today_info(today), "mode": "monitor", "sessions": []}
 
     def pick(sql, args):
         out = []
@@ -157,6 +164,7 @@ def sessions_around(conn, rid: int, today: date | None = None) -> dict:
             " WHERE w.runner_id=? AND p.active=1 AND ")
     d = today.isoformat()
     return {
+        "today_is": today_info(today),
         "mode": "guided", "running": m["running"], "strength": m["strength"],
         "last": pick(base + "w.date<? ORDER BY w.date DESC LIMIT 2", (rid, d)),
         "today": pick(base + "w.date=?", (rid, d)),
