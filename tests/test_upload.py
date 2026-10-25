@@ -412,6 +412,26 @@ def test_week_summary_zones_and_programme(env):
     assert len(vs["missed"]) == 1 and vs["long_run"]["planned_km"] == 12
 
 
+def test_week_counts_sessions_of_a_programme_replaced_midweek():
+    from app import plans
+    c = connect(":memory:")
+    init_db(c)
+    rid, _, _ = add_runner(c, "Andy", "111", 186, None)
+    start = date(2026, 10, 19)
+
+    def plan(active, first, sessions):
+        pid = c.execute("INSERT INTO plans (runner_id, type, start_date, end_date, active) VALUES (?,?,?,?,?)",
+                        (rid, "run", first, "2026-11-15", active)).lastrowid
+        for d, km, st in sessions:
+            c.execute("INSERT INTO planned_workouts (plan_id, runner_id, date, description, target, status)"
+                      " VALUES (?,?,?,?,?,?)", (pid, rid, d, "run", json.dumps({"kind": "easy", "km": km}), st))
+    plan(0, "2026-10-01", [("2026-10-20", 5, "done"), ("2026-10-22", 6, "done"),
+                           ("2026-10-24", 9, "planned"), ("2026-10-25", 13, "planned")])
+    plan(1, "2026-10-24", [("2026-10-24", 5, "done"), ("2026-10-25", 13, "done")])
+    vs = plans.week_vs_programme(c, rid, start, start + timedelta(days=7), {"total_km": 27.2})
+    assert vs["planned_km"] == 29 and vs["sessions_planned"] == 4 and vs["done"] == 4
+
+
 def test_month_summary(env):
     conn, runner, folder, _ = env
     rid = runner["runner_id"]

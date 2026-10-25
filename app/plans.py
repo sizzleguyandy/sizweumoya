@@ -208,11 +208,26 @@ def strength_vs_programme(conn, rid: int, start: date, end: date) -> dict:
 
 
 def week_vs_programme(conn, rid: int, start: date, end: date, actual: dict) -> dict:
-    """Guided mode: this week's run programme against what was done."""
+    """Guided mode: this week's run programme against what was done.
+
+    When Coach Andy loaded a new programme partway through the week, the days before it
+    started still count with the sessions of the programme it replaced, so the week is
+    compared with everything that was planned for it, not just the second half."""
     ws = conn.execute(
         "SELECT w.* FROM planned_workouts w JOIN plans p ON p.id=w.plan_id WHERE w.runner_id=?"
         " AND p.active=1 AND p.type='run' AND w.date>=? AND w.date<? ORDER BY w.date",
         (rid, start.isoformat(), end.isoformat())).fetchall()
+    cur = conn.execute("SELECT id, start_date FROM plans WHERE runner_id=? AND type='run' AND active=1"
+                       " ORDER BY id DESC LIMIT 1", (rid,)).fetchone()
+    first = min([w["date"] for w in ws] + ([cur["start_date"]] if cur and cur["start_date"] else []), default=None)
+    if cur and first and first > start.isoformat():
+        prev = conn.execute("SELECT id FROM plans WHERE runner_id=? AND type='run' AND active=0 AND id<?"
+                            " ORDER BY id DESC LIMIT 1", (rid, cur["id"])).fetchone()
+        if prev:
+            earlier = conn.execute(
+                "SELECT * FROM planned_workouts WHERE plan_id=? AND date>=? AND date<? ORDER BY date",
+                (prev["id"], start.isoformat(), first)).fetchall()
+            ws = list(earlier) + list(ws)
     if not ws:
         return {"sessions_planned": 0}
     targets = [(w, _target(w)) for w in ws]
