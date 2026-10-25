@@ -115,7 +115,9 @@ def test_short_titles():
 
 def test_anything_from_strava_is_recognised():
     assert intervals.from_strava({"source": "STRAVA"})
-    assert intervals.from_strava({"source": "OAUTH_CLIENT", "strava_id": 123})
+    # A Zepp run Intervals.icu also links to its Strava copy is still the person's own watch file.
+    assert not intervals.from_strava({"source": "ZEPP", "strava_id": 20723779993,
+                                      "device_name": "ZEPP Amazfit Balance 2"})
     assert intervals.from_strava({"_note": "STRAVA activities are not available via the API"})
     assert not intervals.from_strava({"source": "OAUTH_CLIENT", "device_name": "Amazfit Balance 2"})
 

@@ -253,9 +253,11 @@ def reconcile(conn, rid: int, days: int = 28) -> dict:
 # ---- pull: activities and wellness ----------------------------------------------------
 
 def from_strava(activity: dict) -> bool:
-    """True for anything that came from Strava, by any marker Intervals.icu gives."""
-    src = " ".join(str(activity.get(k) or "") for k in ("source", "external_id", "_note", "device_name")).upper()
-    return "STRAVA" in src or bool(activity.get("strava_id"))
+    """True when Intervals.icu got this activity from Strava (source STRAVA, or the stub with a
+    Strava note it returns instead). A run recorded on the person's own watch and synced from
+    its app is theirs even if Intervals.icu also lists its Strava twin (strava_id)."""
+    return ("STRAVA" in str(activity.get("source") or "").upper()
+            or "STRAVA" in str(activity.get("_note") or "").upper())
 
 
 def pull_activities(conn, rid: int, since: date) -> dict:
@@ -270,6 +272,7 @@ def pull_activities(conn, rid: int, since: date) -> dict:
         for a in acts:
             if from_strava(a):
                 counts["skipped"] += 1   # nothing from Strava is used anywhere in this system
+                log.info("intervals activity %s skipped: came from Strava", a.get("id"))
                 continue
             try:
                 f = c.get(f"/activity/{a['id']}/fit-file")
