@@ -98,6 +98,9 @@ def main() -> None:
     ic = sub.add_parser("intervals-connect", help="link Intervals.icu (key read from INTERVALS_API_KEY)")
     ic.add_argument("--runner", type=int, required=True)
     ic.add_argument("--athlete-id", required=True)
+    dd = sub.add_parser("dedupe-runs", help="find runs stored twice from different files (--apply removes them)")
+    dd.add_argument("--runner", type=int, required=True)
+    dd.add_argument("--apply", action="store_true")
     isc = sub.add_parser("intervals-set-coach", help="mark this person's own Intervals.icu key as Coach Andy's")
     isc.add_argument("--runner", type=int, required=True)
     ilk = sub.add_parser("intervals-link", help="link an athlete who accepted Coach Andy as coach (no key)")
@@ -211,6 +214,18 @@ def main() -> None:
             raise SystemExit("Set INTERVALS_API_KEY in the environment first (never on the command line).")
         intervals.connect(conn, args.runner, args.athlete_id, key)
         print(f"Runner {args.runner} linked to Intervals.icu athlete {args.athlete_id}.")
+    elif args.cmd == "dedupe-runs":
+        from . import ingest
+        pairs = ingest.duplicate_runs(conn, args.runner)
+        for keep, extra in pairs:
+            print(f"{keep['date']}  {keep['distance_km']} km {keep['duration_s']} s  keep {keep['activity_key'][:16]}"
+                  f"{' (in programme)' if keep['planned'] else ''}  remove {extra['activity_key'][:16]}"
+                  f" ({extra['distance_km']} km {extra['duration_s']} s)")
+        if args.apply:
+            print("removed:", ingest.remove_duplicate_runs(conn, args.runner))
+            record.export_runner(conn, args.runner)
+        else:
+            print(f"{len(pairs)} duplicates found. Nothing changed; add --apply to remove them.")
     elif args.cmd == "intervals-set-coach":
         intervals.set_coach(conn, args.runner)
         print(f"Runner {args.runner}'s Intervals.icu key is now used for every athlete Coach Andy coaches.")

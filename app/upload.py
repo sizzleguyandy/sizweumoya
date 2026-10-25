@@ -95,6 +95,10 @@ def process_blob(conn, runner, name: str, data: bytes, note: str = "") -> dict:
     ingest.update_max_hr(conn, runner, act.max_hr)
     runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (runner["runner_id"],)).fetchone()
     if act.kind == "run":
+        twin = ingest.same_run(conn, runner["runner_id"], act.local_date, round(act.distance_m / 1000, 2),
+                               int(act.timer_s or act.elapsed_s))
+        if twin:
+            return {"file": name, "status": "duplicate", "kind": "run", "same_as": twin}
         row = ingest.store_run(conn, runner, act, key, note)
         return {"file": name, "status": "stored", "kind": "run", "date": row["date"],
                 "distance_km": row["distance_km"], "duration_s": row["duration_s"],

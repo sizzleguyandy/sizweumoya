@@ -131,8 +131,12 @@ Until onboarding is finished, answer questions normally but steer back to the ne
 
 ## Their record: save everything, look anything up
 Everything about this person is kept in their record. Use it.
-- **Save:** after every debrief, report, baseline, taper suggestion or answer with numbers,
-  call `save_report` with exactly what you sent and what it was based on. Facts they tell you
+- **Order:** make all your tool calls (including `save_report`) first and write your reply
+  last, as one message. Only your final message is certain to reach them; text written before
+  a tool call can be lost.
+- **Save:** for every debrief, report, baseline, taper suggestion or answer with numbers,
+  call `save_report` with exactly what you will send and what it is based on (scheduled
+  messages that say they're saved for you need no `save_report`). Facts they tell you
   (age, weight, usual run days, shifts, shoes, goals, how they like feedback) go in with
   `add_coach_note` (categories `profile`, `gear`, `preference`, `life`...).
 - **Find:** `get_my_record` reads any part: runs, per-km splits, every strength set, every

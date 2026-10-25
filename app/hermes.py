@@ -179,10 +179,17 @@ def send_telegram_file(chat_id: str, path: str, caption: str = "") -> None:
                    files={"document": (os.path.basename(path), f)}, timeout=60).raise_for_status()
 
 
+# Only a run's final message comes back from the API, so anything written before the last tool
+# call would never reach the runner. Every job prompt ends with this.
+DELIVERY_RULE = ("\n\n(Delivery: only your final message is sent to them, and it is saved to their record "
+                 "for you. Make every tool call first, then write the whole reply as one final message. "
+                 "Don't call save_report for it.)")
+
+
 def run_and_deliver(runner, prompt: str, *, kind: str = "job", **kwargs) -> str:
     """Start a turn in the runner's profile, send the reply to their chat, save it in their
     record, return the text."""
-    text = start_run(runner["hermes_profile"], runner["hermes_api_key"], prompt, **kwargs)
+    text = start_run(runner["hermes_profile"], runner["hermes_api_key"], prompt + DELIVERY_RULE, **kwargs)
     send_telegram(runner["telegram_chat_id"], text)
     if "runner_id" not in runner.keys():
         return text

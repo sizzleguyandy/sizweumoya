@@ -62,6 +62,34 @@ def test_same_file_twice_is_stored_once(env):
     assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
 
 
+def test_same_run_from_another_file_is_stored_once(env):
+    """The watch's export and Intervals.icu's copy of one run are different files."""
+    conn, runner, folder, _ = env
+    upload.process_path(conn, runner, _save(folder, "a.fit", run_fit(_start(), seconds=2348, hr=158)))
+    twin = upload.process_path(conn, runner, _save(folder, "b.fit", run_fit(_start(), seconds=2349, hr=157)))
+    assert twin["activity"]["status"] == "duplicate" and twin["activity"]["same_as"].startswith("fit:")
+    other = upload.process_path(conn, runner, _save(folder, "c.fit", run_fit(_start(hour=16), seconds=1200)))
+    assert other["activity"]["status"] == "stored"      # a second, different run that day is kept
+    assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 2
+
+
+def test_dedupe_keeps_the_run_the_programme_points_to(env):
+    conn, runner, _, _ = env
+    rid = runner["runner_id"]
+    d = _start().date().isoformat()
+    for key, secs in (("fit:a", 2348), ("fit:b", 2349), ("fit:c", 1200)):
+        conn.execute("INSERT INTO runs (runner_id, activity_key, date, distance_km, duration_s) VALUES (?,?,?,?,?)",
+                     (rid, key, d, 6.18 if secs > 2000 else 3.0, secs))
+    pid = conn.execute("INSERT INTO plans (runner_id, type, start_date, active) VALUES (?, 'run', ?, 1)",
+                       (rid, d)).lastrowid
+    conn.execute("INSERT INTO planned_workouts (plan_id, runner_id, date, description, status,"
+                 " completed_activity_key) VALUES (?,?,?,?, 'done', 'fit:b')", (pid, rid, d, "Easy"))
+    pairs = ingest.duplicate_runs(conn, rid)
+    assert [(k["activity_key"], x["activity_key"]) for k, x in pairs] == [("fit:b", "fit:a")]
+    assert ingest.remove_duplicate_runs(conn, rid) == 1
+    assert {r[0] for r in conn.execute("SELECT activity_key FROM runs")} == {"fit:b", "fit:c"}
+
+
 def test_short_run_flagged(env):
     conn, runner, folder, _ = env
     res = upload.process_path(conn, runner, _save(folder, "s.fit", run_fit(_start(), seconds=600, speed_mps=3)))

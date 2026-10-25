@@ -72,11 +72,11 @@ def _garmin_files(items: list[dict]) -> None:
                 prompt = (f"A run just synced from {source} ({res['date']}, {res['distance_km']} km). Give the run "
                           "debrief as usual (get_recent_runs for the numbers). Put this line directly under your "
                           f"first sentence: \"{source}\". End with: \"Insights derived in part from Garmin "
-                          "device-sourced data.\" Then save_report.")
+                          "device-sourced data.\"")
             elif res["kind"] == "strength":
                 prompt = (f"A strength session just synced from {source} ({res['date']}). Give the strength debrief "
                           f"as usual. Put \"{source}\" on its own line directly above the card. End with: "
-                          "\"Insights derived in part from Garmin device-sourced data.\" Then save_report.")
+                          "\"Insights derived in part from Garmin device-sourced data.\"")
             else:
                 continue
             hermes.run_and_deliver(runner, prompt, kind="debrief")
@@ -136,7 +136,7 @@ def _hevy_workout(runner: dict, workout_id: str) -> None:
                 f"({res['date']}, {res['title']}, {res['sets']} working sets"
                 + (", edited" if res["status"] == "updated" else "") + "). Give the strength debrief: "
                 "call get_last_strength_session and get_strength_review, follow the strength guidance, "
-                "one tip at most, then save_report.", kind="strength_debrief")
+                "one tip at most.", kind="strength_debrief")
     except Exception:
         log.exception("Hevy workout %s for runner %s could not be processed", workout_id, runner["runner_id"])
 
@@ -324,10 +324,10 @@ def _intervals_sync(links: list[dict]) -> None:
             for a in res["stored"]:
                 if a["kind"] == "run" and not a.get("short"):
                     hermes.run_and_deliver(runner, f"A run just synced ({a['date']}, {a['distance_km']} km). "
-                                           "Give the run debrief as usual, then save_report.", kind="debrief")
+                                           "Give the run debrief as usual.", kind="debrief")
                 elif a["kind"] == "strength":
                     hermes.run_and_deliver(runner, f"A strength session just synced ({a['date']}). Give the "
-                                           "strength debrief as usual, then save_report.", kind="strength_debrief")
+                                           "strength debrief as usual.", kind="strength_debrief")
         except Exception:
             log.exception("Intervals.icu sync failed for runner %s", rid)
 

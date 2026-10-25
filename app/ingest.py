@@ -32,6 +32,53 @@ def exists(conn, key: str) -> str | None:
     return None
 
 
+def same_run(conn, rid: int, day: str, distance_km: float, duration_s: float) -> str | None:
+    """The key of a run already stored that is this one under another file (the watch's own
+    export and Intervals.icu's copy differ byte for byte): same day, distance within 1% (50 m)
+    and moving time within 1% (30 s). Spreadsheet rows are replaced by the file instead."""
+    r = conn.execute(
+        "SELECT activity_key FROM runs WHERE runner_id=? AND date=? AND source!='sheet' AND abs(distance_km-?)<=max(0.05, 0.01*?)"
+        " AND abs(duration_s-?)<=max(30, 0.01*?) LIMIT 1",
+        (rid, day, distance_km, distance_km, duration_s, duration_s)).fetchone()
+    return r[0] if r else None
+
+
+def _twins(a: dict, b: dict) -> bool:
+    if not (a["distance_km"] and a["duration_s"] and b["distance_km"] and b["duration_s"]):
+        return False
+    return (abs(a["distance_km"] - b["distance_km"]) <= max(0.05, 0.01 * a["distance_km"])
+            and abs(a["duration_s"] - b["duration_s"]) <= max(30, 0.01 * a["duration_s"]))
+
+
+def duplicate_runs(conn, rid: int) -> list[tuple[dict, dict]]:
+    """Pairs (kept, extra) of runs stored twice. The one a programme session points to is kept,
+    otherwise the first stored."""
+    rows = [dict(r) for r in conn.execute(
+        "SELECT r.id, r.activity_key, r.date, r.distance_km, r.duration_s,"
+        " EXISTS(SELECT 1 FROM planned_workouts w WHERE w.completed_activity_key=r.activity_key) planned"
+        " FROM runs r WHERE r.runner_id=? AND r.source!='sheet' ORDER BY r.date, r.id", (rid,))]
+    groups: list[list[dict]] = []
+    for r in rows:
+        g = next((g for g in groups if g[0]["date"] == r["date"] and _twins(g[0], r)), None)
+        (g.append(r) if g else groups.append([r]))
+    out = []
+    for g in groups:
+        keep = next((r for r in g if r["planned"]), g[0])
+        out += [(keep, r) for r in g if r is not keep]
+    return out
+
+
+def remove_duplicate_runs(conn, rid: int) -> int:
+    pairs = duplicate_runs(conn, rid)
+    for keep, extra in pairs:
+        conn.execute("UPDATE planned_workouts SET completed_activity_key=? WHERE completed_activity_key=?",
+                     (keep["activity_key"], extra["activity_key"]))
+        conn.execute("DELETE FROM run_splits WHERE run_id=?", (extra["id"],))
+        conn.execute("DELETE FROM runs WHERE id=?", (extra["id"],))
+    conn.commit()
+    return len(pairs)
+
+
 def update_max_hr(conn, runner, observed: float | None) -> bool:
     """Raise the runner's max HR (and default zones) when a file shows a higher one.
 
