@@ -12,7 +12,7 @@ from datetime import date
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
-from . import garmin, hermes, hevy, intervals, plans, queries, record, trends
+from . import garmin, hermes, hevy, intervals, onboarding, plans, queries, record, trends
 from .config import settings
 from .db import connect, init_db, session
 
@@ -300,9 +300,12 @@ def job_intervals_sync(request: Request, tasks: BackgroundTasks):
     calendar brought in line with the programme."""
     _check_jobs_token(request)
     with session() as conn:
-        links = [dict(r) for r in conn.execute("SELECT * FROM intervals_links")]
+        links = [dict(r) for r in conn.execute("SELECT * FROM intervals_links WHERE status='active'")]
+        waiting = [r[0] for r in conn.execute("SELECT runner_id FROM intervals_links WHERE status='approved'")]
     tasks.add_task(_intervals_sync, links)
-    return {"queued": len(links)}
+    for rid in waiting:
+        tasks.add_task(onboarding.intervals_link_ready, rid)
+    return {"queued": len(links), "waiting_for_coach_request": len(waiting)}
 
 
 def _intervals_sync(links: list[dict]) -> None:

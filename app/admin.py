@@ -15,6 +15,9 @@
   python -m app.admin export-record --runner 2 [--to path.db]
   python -m app.admin offboard --runner 2 [--keep-copy path.db]
   INTERVALS_API_KEY=... python -m app.admin intervals-connect --runner 1 --athlete-id i12345
+  python -m app.admin intervals-set-coach --runner 1        # Coach Andy's own key coaches everyone else
+  python -m app.admin intervals-link --runner 2 --athlete-id i23456   # athlete accepted Coach Andy as coach
+  python -m app.admin intervals-check --runner 2
   python -m app.admin intervals-push --runner 1 [--days 28] [--dry-run]
   python -m app.admin set-steps --runner 1 --date 2026-10-29 --steps "- 15m Z2 HR|4x|- 3m Z4 HR|- 3m Z1 HR|- 10m Z2 HR"
   python -m app.admin intervals-pull --runner 1 --since 2026-10-01
@@ -95,6 +98,13 @@ def main() -> None:
     ic = sub.add_parser("intervals-connect", help="link Intervals.icu (key read from INTERVALS_API_KEY)")
     ic.add_argument("--runner", type=int, required=True)
     ic.add_argument("--athlete-id", required=True)
+    isc = sub.add_parser("intervals-set-coach", help="mark this person's own Intervals.icu key as Coach Andy's")
+    isc.add_argument("--runner", type=int, required=True)
+    ilk = sub.add_parser("intervals-link", help="link an athlete who accepted Coach Andy as coach (no key)")
+    ilk.add_argument("--runner", type=int, required=True)
+    ilk.add_argument("--athlete-id", required=True)
+    ick = sub.add_parser("intervals-check", help="show a person's Intervals.icu link and try it now")
+    ick.add_argument("--runner", type=int, required=True)
     ip = sub.add_parser("intervals-push", help="send upcoming programme sessions to the Intervals.icu calendar")
     ip.add_argument("--runner", type=int, required=True)
     ip.add_argument("--days", type=int, default=28)
@@ -201,6 +211,24 @@ def main() -> None:
             raise SystemExit("Set INTERVALS_API_KEY in the environment first (never on the command line).")
         intervals.connect(conn, args.runner, args.athlete_id, key)
         print(f"Runner {args.runner} linked to Intervals.icu athlete {args.athlete_id}.")
+    elif args.cmd == "intervals-set-coach":
+        intervals.set_coach(conn, args.runner)
+        print(f"Runner {args.runner}'s Intervals.icu key is now used for every athlete Coach Andy coaches.")
+    elif args.cmd == "intervals-link":
+        intervals.request_link(conn, args.runner, args.athlete_id)
+        intervals.approve_link(conn, args.runner)
+        print("Linked, waiting for access." if not onboarding.intervals_link_ready(args.runner)
+              else "Linked and live: history brought in.")
+    elif args.cmd == "intervals-check":
+        link = intervals.link_for(conn, args.runner, any_status=True)
+        print(f"athlete {link['athlete_id']}  status {link['status']}  via coach {bool(link['via_coach'])}"
+              f"  last sync {link['last_sync']}")
+        ok = intervals.check_access(conn, args.runner) is not None
+        print("Coach Andy's key can reach this athlete." if ok else
+              "No access yet: they haven't accepted the coaching request in Intervals.icu.")
+        if ok and link["status"] == "approved":
+            onboarding.intervals_link_ready(args.runner)
+            print("Now live.")
     elif args.cmd == "intervals-push":
         res = intervals.push(conn, args.runner, days=args.days, dry_run=args.dry_run)
         if args.dry_run:

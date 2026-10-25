@@ -448,12 +448,40 @@ def set_my_watch(ctx: Context, brand: str) -> dict:
 
 
 @mcp.tool()
+def connect_my_intervals(ctx: Context, athlete_id: str) -> str:
+    """Link this person's Intervals.icu account so their runs sync on their own and any programme
+    goes to their calendar and watch. athlete_id is the ID they read off intervals.icu (starts
+    with i, e.g. i123456). Never ask for or accept a password or API key: none is needed.
+    Coach Andy confirms it is them and sends a coaching request they must accept."""
+    r = _runner(ctx)
+    try:
+        with _write(r["runner_id"]) as conn:
+            link = intervals.request_link(conn, r["runner_id"], athlete_id)
+            aid = queries.create_approval(
+                conn, r["runner_id"], "Link Intervals.icu",
+                f"Link {r['name']} to Intervals.icu athlete {link['athlete_id']}. Before approving: in Intervals.icu "
+                f"send a coaching request to {link['athlete_id']} and check the account is theirs.",
+                "intervals", {"athlete_id": link["athlete_id"]})
+    except intervals.IntervalsError as e:
+        if "someone else" in str(e):
+            hermes.notify_coach(f"{r['name']} gave Intervals.icu athlete ID {athlete_id!r}, which is already "
+                                "linked to another person. Nothing was changed.")
+        return f"Not linked: {e}."
+    hermes.notify_coach(f"Approval needed [{aid}] for {r['name']}: link Intervals.icu athlete {link['athlete_id']}.\n"
+                        f"1) In Intervals.icu send a coaching request to {link['athlete_id']} and check it's them. "
+                        f"2) Reply approve {aid} (or reject {aid}).")
+    return ("Saved. Coach Andy will check it and send you a coaching request in Intervals.icu; "
+            "accept it, and your runs will start coming through on their own (usually within the hour).")
+
+
+@mcp.tool()
 def mark_onboarding_step(ctx: Context, step: str) -> str:
-    """Record an onboarding step that has no data of its own. step: history_fresh (runner has
+    """Record an onboarding step that has no data of its own. step: sync_files (they won't or
+    can't use Intervals.icu and will send files instead), history_fresh (runner has
     no history to send), no_zones (runner can't find their zones), races_asked (asked about
     races; save any with save_race first), health_asked (asked about injuries; save any as a
     health note and alert_coach first)."""
-    notes = {"history_fresh": "history: starting fresh", "no_zones": "zones: none available",
+    notes = {"sync_files": "sync: files instead", "history_fresh": "history: starting fresh", "no_zones": "zones: none available",
              "races_asked": "races asked", "health_asked": "health asked"}
     if step not in notes:
         return f"step must be one of {sorted(notes)}"
@@ -557,6 +585,17 @@ def _resync_calendar(conn, rid: int, *days: str) -> None:
         log.exception("calendar update for runner %s failed", rid)
 
 
+def _link_in_background(runner: dict) -> None:
+    """Try the new Intervals.icu link straight away (it works if they already accepted the
+    coaching request); otherwise the hourly sync keeps trying."""
+    def _work() -> None:
+        try:
+            onboarding.intervals_link_ready(runner["runner_id"])
+        except Exception:
+            log.exception("Intervals.icu link for runner %s", runner.get("runner_id"))
+    threading.Thread(target=_work, name=f"intervals-link-{runner['runner_id']}", daemon=True).start()
+
+
 def _deliver_in_background(runner: dict, prompt: str, label: str) -> None:
     """Start a turn in the runner's profile on a background thread and deliver the reply.
 
@@ -616,11 +655,21 @@ def coach_decide(ctx: Context, approval_id: str, decision: str, note: str = "") 
         if decision == "approved":
             onboarding.apply_zones(conn, row)
             applied = _apply_move(conn, row)
+            if row.get("kind") == "intervals":
+                intervals.approve_link(conn, row["runner_id"])
+        elif row.get("kind") == "intervals":
+            conn.execute("DELETE FROM intervals_links WHERE runner_id=? AND via_coach=1 AND status='requested'",
+                         (row["runner_id"],))
+            conn.commit()
     record.schedule_export(runner["runner_id"])
     if applied and applied.get("error"):
         note = (note + " " if note else "") + f"(The programme could not be updated: {applied['error']})"
     elif applied:
         note = (note + " " if note else "") + f"(Programme updated: moved to {applied['to']}.)"
+    if row.get("kind") == "intervals" and decision == "approved":
+        _link_in_background(runner)
+        note = (note + " " if note else "") + ("(Once they accept the coaching request in Intervals.icu, "
+                                              "their history comes in and they are told.)")
     _deliver_decision(runner, decision, proposal, note)
     if applied:
         return (f"Recorded: {decision}. " + (f"Programme NOT updated: {applied['error']}" if applied.get("error")

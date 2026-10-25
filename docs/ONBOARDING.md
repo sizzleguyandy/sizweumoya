@@ -17,12 +17,16 @@ Sarah introduces herself and starts onboarding in Telegram.
 1. **Consent**: data use, heart rate as health data, Coach Andy can see it, AI-written replies,
    deletion any time. Recorded only on a clear yes. Nothing else happens without it.
 2. **Focus**: runs, lifts or both. Decides how they are coached (see below).
-3. **Watch** (runners): brand, then instructions for getting .fit files off it.
-4. **History**: last 6-8 weeks of files, or typed gym sessions, or "starting fresh".
-5. **Zones** (runners): screenshot of the watch's HR zones -> a request Coach Andy approves
-   (`approve <id>`), which applies and locks them.
-6. **Races** (runners) and 7. **Health**: saved; injuries alert Coach Andy.
-8. **Finish**: Coach Andy gets a new-runner summary. Scheduled reports and nudges start.
+3. **Watch** (runners): brand.
+4. **Sync** (runners): Intervals.icu first (free; runs arrive by themselves, programme goes to
+   the watch; they give only their athlete ID, never a key; see `INTERVALS.md`). Otherwise
+   instructions for sending .fit files.
+5. **History**: with Intervals.icu, the last 8 weeks arrive by themselves once linked;
+   otherwise 6-8 weeks of files, typed gym sessions, or "starting fresh".
+6. **Zones** (runners): from their Intervals.icu threshold, or a screenshot of the watch's HR
+   zones -> a request Coach Andy approves (`approve <id>`), which applies and locks them.
+7. **Races** (runners) and 8. **Health**: saved; injuries alert Coach Andy.
+9. **Finish**: Coach Andy gets a new-runner summary. Scheduled reports and nudges start.
 
 ## Focus and options
 | focus | coached as | weekly / monthly report |

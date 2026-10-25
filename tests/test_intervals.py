@@ -146,3 +146,73 @@ def test_reconcile_updates_and_removes_only_our_stale_entries(db, monkeypatch):
     c.commit()
     calls.clear()
     assert intervals.reconcile(c, rid)["removed"] == 2
+
+
+# ---- athletes linked through Coach Andy's account ---------------------------------------
+
+def _coached(c):
+    rid2, _, _ = add_runner(c, "Tom", "222", None, None)
+    return rid2
+
+
+def test_link_through_coach_needs_no_key_and_uses_coach_key(db, monkeypatch):
+    c, coach = db
+    tom = _coached(c)
+    with pytest.raises(intervals.IntervalsError):
+        intervals.normalise_athlete_id("my password")
+    assert intervals.request_link(c, tom, "I777 ")["athlete_id"] == "i777"
+    with pytest.raises(intervals.IntervalsError):      # not active until approved and accepted
+        intervals.link_for(c, tom)
+    with pytest.raises(intervals.IntervalsError):      # no coach account marked yet
+        intervals.link_for(c, tom, any_status=True)
+    intervals.set_coach(c, coach)
+    link = intervals.link_for(c, tom, any_status=True)
+    assert link["api_key"] == "an-intervals-api-key" and link["via_coach"] == 1
+    stored = c.execute("SELECT api_key FROM intervals_links WHERE runner_id=?", (tom,)).fetchone()[0]
+    assert stored == ""                                  # nobody else's key is ever kept
+
+
+def test_athlete_id_cannot_be_claimed_twice(db):
+    c, coach = db
+    tom = _coached(c)
+    with pytest.raises(intervals.IntervalsError, match="someone else"):
+        intervals.request_link(c, tom, "i12345")         # Coach Andy's own athlete ID
+    with pytest.raises(intervals.IntervalsError, match="own key"):
+        intervals.request_link(c, coach, "i999")
+
+
+def test_zones_from_intervals_threshold():
+    a = {"sportSettings": [{"types": ["Ride"], "lthr": 170},
+                           {"types": ["Run", "VirtualRun"], "lthr": 165, "max_hr": 186}]}
+    assert intervals.zones_from_athlete(a) == {"lthr": 165, "max_hr": 186, "zones": [132, 144, 152, 162]}
+    assert intervals.zones_from_athlete({"sportSettings": [{"types": ["Run"]}]}) is None
+
+
+def test_link_goes_live_once_coach_request_is_accepted(db, monkeypatch):
+    from app import onboarding
+    c, coach = db
+    intervals.set_coach(c, coach)
+    tom = _coached(c)
+    intervals.request_link(c, tom, "i777")
+    intervals.approve_link(c, tom)
+    accepted = {"yes": False}
+
+    def handler(req):
+        p = req.url.path
+        assert req.headers["authorization"].startswith("Basic ")
+        if p == "/api/v1/athlete/i777":
+            if not accepted["yes"]:
+                return httpx.Response(403, json={"error": "denied"})
+            return httpx.Response(200, json={"sportSettings": [{"types": ["Run"], "lthr": 170, "max_hr": 190}]})
+        if p.endswith("/activities") or p.endswith("/wellness") or p.endswith("/events"):
+            return httpx.Response(200, json=[])
+        return httpx.Response(404)
+    mock(monkeypatch, handler)
+    assert onboarding.complete_intervals_link(c, tom) is None
+    assert c.execute("SELECT status FROM intervals_links WHERE runner_id=?", (tom,)).fetchone()[0] == "approved"
+    accepted["yes"] = True
+    out = onboarding.complete_intervals_link(c, tom)
+    assert out["activities"]["stored"] == 0 and out["zones_request"]
+    assert c.execute("SELECT status FROM intervals_links WHERE runner_id=?", (tom,)).fetchone()[0] == "active"
+    z = c.execute("SELECT kind, status, payload FROM approvals WHERE runner_id=?", (tom,)).fetchone()
+    assert z["kind"] == "zones" and z["status"] == "pending" and json.loads(z["payload"])["max_hr"] == 190

@@ -1,4 +1,4 @@
-"""New-runner onboarding: consent, watch, history, zones, races and injuries, then go live.
+"""New-runner onboarding: consent, watch, syncing, history, zones, races and injuries, then go live.
 
 Sarah asks for what is missing, in order; `status` tells her what that is. Nothing here
 writes a stat the coach owns: zones from a screenshot become a request Coach Andy approves.
@@ -6,7 +6,7 @@ writes a stat the coach owns: zones from a screenshot become a request Coach And
 import json
 from datetime import date, datetime
 
-from . import queries
+from . import intervals, queries
 
 WATCHES = {
     "garmin": (
@@ -33,7 +33,7 @@ WATCHES = {
 OTHER_WATCH = ("Look in your watch app for the workout's export or share option and choose .fit. "
                "If only .gpx or .tcx is offered, tell me which, and I'll let Coach Andy know.")
 
-STEPS = ("consent", "focus", "watch", "history", "zones", "races", "health", "finish")
+STEPS = ("consent", "focus", "watch", "sync", "history", "zones", "races", "health", "finish")
 FOCUSES = ("running", "strength", "hybrid")
 
 
@@ -54,12 +54,14 @@ def status(conn, rid: int) -> dict:
     asked = {n["note"] for n in conn.execute(
         "SELECT note FROM coach_notes WHERE runner_id=? AND category='profile'", (rid,))}
     lifts = conn.execute("SELECT COUNT(*) FROM strength_sessions WHERE runner_id=?", (rid,)).fetchone()[0]
+    link = conn.execute("SELECT athlete_id, status FROM intervals_links WHERE runner_id=?", (rid,)).fetchone()
     focus_set = "focus set" in asked
     runner_steps = r["focus"] in ("running", "hybrid")  # watch, zones and races are for running
     done = {
         "consent": bool(r["consent_at"]),
         "focus": focus_set,
         "watch": bool(r["watch"]) or (focus_set and not runner_steps),
+        "sync": (focus_set and not runner_steps) or bool(link) or "sync: files instead" in asked,
         "history": runs > 0 or lifts > 0 or "history: starting fresh" in asked,
         "zones": (not runner_steps and focus_set) or bool(r["zones_locked"]) or bool(zones_req)
                  or "zones: none available" in asked,
@@ -70,7 +72,8 @@ def status(conn, rid: int) -> dict:
     nxt = next((s for s in STEPS if not done[s]), None)
     return {"onboarded": done["finish"], "focus": r["focus"] if focus_set else None,
             "done": done, "next_step": nxt,
-            "zones_request": zones_req["status"] if zones_req else None, "runs_on_file": runs}
+            "zones_request": zones_req["status"] if zones_req else None, "runs_on_file": runs,
+            "intervals": link["status"] if link else None}
 
 
 def record_consent(conn, rid: int) -> str:
@@ -93,6 +96,9 @@ def set_focus(conn, rid: int, focus: str) -> str:
 
 def set_watch(conn, rid: int, brand: str) -> dict:
     info = instructions(brand)
+    sync = sync_instructions(info["brand"])
+    if sync:
+        info["sync"] = sync   # offer this first; sending files stays as the fallback
     conn.execute("UPDATE runners SET watch=? WHERE runner_id=?", (info["brand"], rid))
     conn.commit()
     return info
@@ -178,3 +184,74 @@ def finish(conn, rid: int) -> dict:
     if missing:
         parts.append("Not completed: " + ", ".join(missing) + ".")
     return {"coach_summary": " ".join(parts), "missing": missing}
+
+
+# ---- syncing through Intervals.icu ---------------------------------------------------
+
+SYNC_HOW = (
+    "1) Make a free account at intervals.icu (sign up with email; don't connect Strava, we don't use it). "
+    "2) In Intervals.icu go to Settings and connect your watch's own app ({app}). {push} "
+    "3) Find your athlete ID: on intervals.icu click your profile picture or Settings; the ID starts "
+    "with i, like i123456, and also shows in the page address. Send it to me here. Never send a "
+    "password or API key, I don't need one. "
+    "4) Coach Andy will send you a coaching request in Intervals.icu; accept it. After that your "
+    "runs come to me on their own, and any programme goes onto your Intervals.icu calendar.")
+SYNC_APPS = {
+    "garmin": ("Garmin Connect", "Tick the option to upload planned workouts, so your sessions land on the watch."),
+    "zepp": ("Zepp", "Your planned sessions can then go to the watch too."),
+    "coros": ("COROS", ""), "suunto": ("Suunto", ""), "polar": ("Polar Flow", ""), "wahoo": ("Wahoo", ""),
+}
+
+
+def sync_instructions(brand: str) -> dict | None:
+    """How to get this watch syncing through Intervals.icu, or None if it can't (send files instead)."""
+    if brand not in SYNC_APPS:
+        return None
+    app, push = SYNC_APPS[brand]
+    return {"via": "intervals.icu", "how": SYNC_HOW.format(app=app, push=push)}
+
+
+def complete_intervals_link(conn, rid: int) -> dict | None:
+    """For an approved link: if Coach Andy's key can now reach the athlete, go live (history,
+    wellness, calendar) and turn their Intervals.icu threshold into a zones request.
+    None while they still haven't accepted the coaching request."""
+    athlete = intervals.check_access(conn, rid)
+    if athlete is None:
+        return None
+    out = intervals.activate(conn, rid)
+    r = conn.execute("SELECT zones_locked FROM runners WHERE runner_id=?", (rid,)).fetchone()
+    pending = conn.execute("SELECT 1 FROM approvals WHERE runner_id=? AND kind='zones' AND status='pending'",
+                           (rid,)).fetchone()
+    z = intervals.zones_from_athlete(athlete)
+    if z and not r["zones_locked"] and not pending:
+        out["zones_request"] = propose_zones(
+            conn, rid, z["zones"], z["max_hr"],
+            f"Intervals.icu run settings: threshold {z['lthr']}"
+            + (f", max {z['max_hr']}" if z["max_hr"] else "")
+            + ". Check these are the runner's real numbers and not Intervals.icu defaults.")
+    return out
+
+
+def intervals_link_ready(rid: int) -> bool:
+    """An approved link: once the athlete has accepted Coach Andy as coach, bring in their
+    history, put any programme on their calendar, ask Coach Andy to confirm the zones from
+    their Intervals.icu settings, and tell them it's working."""
+    from . import hermes, record
+    from .db import session
+    with session() as conn:
+        out = complete_intervals_link(conn, rid)
+        if out is None:
+            return False
+        runner = dict(conn.execute("SELECT * FROM runners WHERE runner_id=?", (rid,)).fetchone())
+    record.schedule_export(rid)
+    c = out["activities"]
+    hermes.notify_coach(f"{runner['name']} is connected to Intervals.icu: {c['stored']} activities brought in"
+                        + (f", zones request [{out['zones_request']}] from their Intervals.icu threshold"
+                           if out.get("zones_request") else "") + ".")
+    if runner.get("hermes_api_key"):
+        hermes.run_and_deliver(
+            runner, f"Their Intervals.icu account is now connected: {c['stored']} past activities came in "
+            f"({c['duplicate']} were already here). Tell them in two or three sentences that runs will now "
+            "arrive on their own after each sync, then carry on with onboarding if it isn't finished "
+            "(get_onboarding_status).", kind="intervals_connected")
+    return True

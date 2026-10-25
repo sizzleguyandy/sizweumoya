@@ -2,13 +2,17 @@
 activities back, and read daily wellness.
 
 Personal connection: athlete ID + API key, HTTP Basic auth with the username "API_KEY".
-Clients will need Intervals.icu OAuth instead; a personal key is for one's own account only.
+Coach Andy connects his own account that way (marked is_coach). Every other athlete links
+through him: they accept Coach Andy as their coach in Intervals.icu, give Sarah their athlete
+ID (not a secret), Coach Andy confirms it is them, and from then on their calendar and
+activities are reached with his key. Nobody else's key is ever asked for or stored.
 
 Pushed sessions carry external_id "sizwe-<planned_workout id>", so re-pushing updates them
 instead of adding copies. A session with structured `steps` (Intervals.icu workout text) is
 followed step by step on the watch; one without becomes a plain calendar note.
 """
 import logging
+import re
 from datetime import date, timedelta
 
 import httpx
@@ -32,16 +36,113 @@ def connect(conn, rid: int, athlete_id: str, api_key: str) -> None:
     if not athlete_id or len(api_key) < 10:
         raise IntervalsError("athlete ID and API key are both needed")
     conn.execute("INSERT INTO intervals_links (runner_id, athlete_id, api_key) VALUES (?,?,?) ON CONFLICT(runner_id)"
-                 " DO UPDATE SET athlete_id=excluded.athlete_id, api_key=excluded.api_key, connected_at=datetime('now')",
+                 " DO UPDATE SET athlete_id=excluded.athlete_id, api_key=excluded.api_key, via_coach=0, status='active',"
+                 " connected_at=datetime('now')",
                  (rid, athlete_id, api_key))
     conn.commit()
 
 
-def link_for(conn, rid: int):
+def link_for(conn, rid: int, *, any_status: bool = False) -> dict:
+    """The person's link, with the key to use (Coach Andy's for an athlete he coaches)."""
     r = conn.execute("SELECT * FROM intervals_links WHERE runner_id=?", (rid,)).fetchone()
     if r is None:
-        raise IntervalsError("this person isn't connected to Intervals.icu (run intervals-connect)")
-    return r
+        raise IntervalsError("this person isn't connected to Intervals.icu")
+    if r["status"] != "active" and not any_status:
+        raise IntervalsError(f"this person's Intervals.icu link is {r['status']}, not active yet")
+    link = dict(r)
+    if link["via_coach"]:
+        link["api_key"] = coach_key(conn)
+    return link
+
+
+def coach_key(conn) -> str:
+    r = conn.execute("SELECT api_key FROM intervals_links WHERE is_coach=1 AND api_key!='' LIMIT 1").fetchone()
+    if r is None:
+        raise IntervalsError("Coach Andy's own Intervals.icu account isn't marked as the coach account "
+                             "(python -m app.admin intervals-set-coach --runner <his id>)")
+    return r["api_key"]
+
+
+def set_coach(conn, rid: int) -> None:
+    r = conn.execute("SELECT api_key FROM intervals_links WHERE runner_id=?", (rid,)).fetchone()
+    if r is None or not r["api_key"]:
+        raise IntervalsError("connect this person with their own key first (intervals-connect)")
+    conn.execute("UPDATE intervals_links SET is_coach=(runner_id=?)", (rid,))
+    conn.commit()
+
+
+# ---- linking an athlete through Coach Andy -------------------------------------------
+
+ATHLETE_RE = re.compile(r"^i?\d{1,10}$")
+
+
+def normalise_athlete_id(athlete_id: str) -> str:
+    a = (athlete_id or "").strip().lower().replace(" ", "")
+    if not ATHLETE_RE.match(a):
+        raise IntervalsError("that doesn't look like an Intervals.icu athlete ID (it looks like i123456)")
+    return a
+
+
+def request_link(conn, rid: int, athlete_id: str) -> dict:
+    """The person says this is their athlete ID. Saved as 'requested' until Coach Andy confirms."""
+    a = normalise_athlete_id(athlete_id)
+    other = conn.execute("SELECT runner_id FROM intervals_links WHERE athlete_id=? AND runner_id!=?",
+                         (a, rid)).fetchone()
+    if other:
+        raise IntervalsError("that athlete ID is already linked to someone else; Coach Andy has been told")
+    cur = conn.execute("SELECT status, via_coach FROM intervals_links WHERE runner_id=?", (rid,)).fetchone()
+    if cur and not cur["via_coach"]:
+        raise IntervalsError("this person is already connected with their own key")
+    conn.execute("INSERT INTO intervals_links (runner_id, athlete_id, api_key, via_coach, status)"
+                 " VALUES (?,?,'',1,'requested') ON CONFLICT(runner_id) DO UPDATE SET athlete_id=excluded.athlete_id,"
+                 " status='requested', connected_at=datetime('now')", (rid, a))
+    conn.commit()
+    return {"athlete_id": a, "status": "requested"}
+
+
+def approve_link(conn, rid: int) -> None:
+    conn.execute("UPDATE intervals_links SET status='approved' WHERE runner_id=? AND status='requested'", (rid,))
+    conn.commit()
+
+
+def check_access(conn, rid: int) -> dict | None:
+    """The athlete's settings if Coach Andy's key can read them (they accepted him as coach), else None."""
+    link = link_for(conn, rid, any_status=True)
+    with _client(link) as c:
+        r = c.get(f"/athlete/{link['athlete_id']}")
+    if r.status_code in (401, 403, 404):
+        return None
+    return _check(r).json()
+
+
+def zones_from_athlete(athlete: dict) -> dict | None:
+    """Run threshold HR and max HR from the athlete's Intervals.icu settings, as our four zone
+    tops (80/87/92/98% of threshold, the split Coach Andy uses)."""
+    for s in athlete.get("sportSettings") or []:
+        if "Run" not in (s.get("types") or []):
+            continue
+        lthr, mx = s.get("lthr"), s.get("max_hr")
+        if not lthr or not 120 <= int(lthr) <= 210:
+            return None
+        tops = [round(int(lthr) * f) for f in (0.80, 0.87, 0.92, 0.98)]
+        return {"lthr": int(lthr), "max_hr": int(mx) if mx and int(mx) > tops[-1] else None, "zones": tops}
+    return None
+
+
+def activate(conn, rid: int, history_weeks: int = 8) -> dict:
+    """First successful access: mark active, bring in recent history and wellness, and put any
+    programme on their calendar."""
+    conn.execute("UPDATE intervals_links SET status='active' WHERE runner_id=?", (rid,))
+    conn.commit()
+    pulled = pull_activities(conn, rid, date.today() - timedelta(weeks=history_weeks))
+    out = {"activities": pulled["counts"]}
+    try:
+        out["wellness_days"] = pull_wellness(conn, rid, date.today() - timedelta(days=14))
+        if planned_sessions(conn, rid, date.today(), date.today() + timedelta(days=28)):
+            out["calendar"] = reconcile(conn, rid)
+    except IntervalsError as e:
+        out["warning"] = str(e)
+    return out
 
 
 def _client(link) -> httpx.Client:

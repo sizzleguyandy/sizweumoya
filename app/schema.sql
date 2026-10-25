@@ -193,7 +193,13 @@ CREATE TABLE IF NOT EXISTS garmin_links (
 CREATE TABLE IF NOT EXISTS intervals_links (
     runner_id      INTEGER PRIMARY KEY REFERENCES runners(runner_id) ON DELETE CASCADE,
     athlete_id     TEXT NOT NULL,
-    api_key        TEXT NOT NULL,
+    api_key        TEXT NOT NULL,          -- '' when linked through Coach Andy's account
+    -- via_coach: read and written with Coach Andy's key (the athlete accepted him as coach).
+    -- is_coach: this row's key is Coach Andy's own, used for every via_coach athlete.
+    via_coach      INTEGER NOT NULL DEFAULT 0,
+    is_coach       INTEGER NOT NULL DEFAULT 0,
+    -- requested (runner gave their ID) -> approved (Coach Andy confirmed it is them) -> active
+    status         TEXT NOT NULL DEFAULT 'active',
     last_sync      TEXT,
     connected_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );

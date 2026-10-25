@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from app import config, ingest, onboarding, plans, programme, queries, record, stats, upload
+from app import config, ingest, intervals, onboarding, plans, programme, queries, record, stats, upload
 from app.admin import add_runner
 from app.db import connect, init_db
 from tests.fitgen import run_fit
@@ -37,7 +37,11 @@ def test_runner_onboarding_in_order(conn):
     onboarding.set_focus(conn, rid, "running")
     info = onboarding.set_watch(conn, rid, "Garmin Forerunner 255")
     assert info["brand"] == "garmin" and "Export Original" in info["how_to_send_files"]
-    assert onboarding.status(conn, rid)["next_step"] == "history"
+    assert "intervals.icu" in info["sync"]["how"] and "upload planned workouts" in info["sync"]["how"]
+    assert onboarding.status(conn, rid)["next_step"] == "sync"
+    intervals.request_link(conn, rid, " I123456 ")
+    st = onboarding.status(conn, rid)
+    assert st["next_step"] == "history" and st["intervals"] == "requested"
     onboarding.mark(conn, rid, "history: starting fresh")
     aid = onboarding.propose_zones(conn, rid, [132, 144, 152, 162], 184, "screenshot")
     assert onboarding.status(conn, rid)["zones_request"] == "pending"
