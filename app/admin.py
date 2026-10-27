@@ -104,13 +104,19 @@ def main() -> None:
     dx.add_argument("--race", default="", help="part of the race name (default: their next race)")
     dx.add_argument("--weekly-km", type=float)
     dx.add_argument("--vdot", type=float)
-    dx.add_argument("--long-day", default="Sun")
-    dx.add_argument("--quality-day", default="Tue")
-    dx.add_argument("--extra-days", default="Thu", help='e.g. "Thu,Sat"')
-    dx.add_argument("--profile", default="conservative", choices=["conservative", "aggressive"])
+    dx.add_argument("--long-day", help="default: their programme form, else Sun")
+    dx.add_argument("--quality-day", help="default: form, else Tue")
+    dx.add_argument("--extra-days", help='e.g. "Thu,Sat" (default: form, else Thu)')
+    dx.add_argument("--profile", choices=["conservative", "aggressive"], help="default: form, else conservative")
+    dx.add_argument("--plan", default="", choices=["", "race", "c25k"], help="default: the form's choice")
     dx.add_argument("--start", help="YYYY-MM-DD, default next Monday")
     dx.add_argument("--propose", action="store_true", help="send it to Coach Andy as an approval")
     dx.add_argument("--test", action="store_true", help="with --propose: mark it TEST everywhere")
+    di = sub.add_parser("dex-intake", help="import Dex programme form answers (Google Forms CSV download)")
+    di.add_argument("--file", required=True)
+    ic2 = sub.add_parser("intake-code", help="a runner's TR3D code for the programme form")
+    ic2.add_argument("--runner", type=int, required=True)
+    sub.add_parser("dex-form", help="print the programme form's questions, to build it in Google Forms")
     dd = sub.add_parser("dedupe-runs", help="find runs stored twice from different files (--apply removes them)")
     dd.add_argument("--runner", type=int, required=True)
     dd.add_argument("--apply", action="store_true")
@@ -233,7 +239,7 @@ def main() -> None:
         from . import dex
         d = dex.draft(conn, args.runner, race_name=args.race, weekly_km=args.weekly_km, vdot=args.vdot,
                       long_day=args.long_day, quality_day=args.quality_day, extra_days=args.extra_days,
-                      profile=args.profile, start=_d.fromisoformat(args.start) if args.start else None)
+                      profile=args.profile, start=_d.fromisoformat(args.start) if args.start else None, plan=args.plan)
         name = conn.execute("SELECT name FROM runners WHERE runner_id=?", (args.runner,)).fetchone()[0]
         print(dex.summary_text(name, d) + "\n")
         print("\n".join(dex.week_lines(d, weeks=99)))
@@ -245,6 +251,26 @@ def main() -> None:
             print(f"\nSent to Coach Andy as request {p['approval_id']} ({p['file']}).")
         else:
             print("\nNothing saved. Add --propose to send it to Coach Andy.")
+    elif args.cmd == "dex-intake":
+        from . import intake
+        res = intake.import_rows(conn, intake.read_csv(args.file))
+        for r in res:
+            if r["status"] == "error":
+                print(f"row {r['row']}: ERROR {r['error']}")
+            else:
+                print(f"row {r['row']}: {r['runner']}: {r['status']}" + (f" ({r['goal']}; {', '.join(r['saved'])})"
+                                                                         if r["status"] == "imported" else ""))
+                if r["status"] == "imported":
+                    record.export_runner(conn, r["runner_id"])
+                    hermes.notify_coach(f"{r['runner']} sent the programme form ({r['goal']})."
+                                        + (f" Health: {r['injuries']}." if r.get("injuries") else "")
+                                        + f" Say \"Dex, plan {r['runner']}\" for a draft.")
+    elif args.cmd == "intake-code":
+        from . import intake
+        print(intake.code_for(conn, args.runner))
+    elif args.cmd == "dex-form":
+        from . import intake
+        print(intake.form_markdown())
     elif args.cmd == "dedupe-runs":
         from . import ingest
         pairs = ingest.duplicate_runs(conn, args.runner)

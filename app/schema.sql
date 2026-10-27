@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS runners (
     latitude          REAL,
     longitude         REAL,
     elevation_m       REAL,
+    intake_code       TEXT UNIQUE,            -- code they type into the Dex programme form
     weight_kg         REAL,
     goal              TEXT,
     units             TEXT NOT NULL DEFAULT 'km',
@@ -180,7 +181,18 @@ CREATE TABLE IF NOT EXISTS races (
     date        TEXT NOT NULL,
     distance_km REAL,
     ascent_m    REAL,
-    note        TEXT
+    note        TEXT,
+    preset_id   TEXT                      -- race library id (app/racelib), when it's a library race
+);
+
+-- Answers from the Dex programme form (Google Form), one row per submission.
+CREATE TABLE IF NOT EXISTS dex_intake (
+    id           INTEGER PRIMARY KEY,
+    runner_id    INTEGER NOT NULL REFERENCES runners(runner_id) ON DELETE CASCADE,
+    submitted_at TEXT NOT NULL,
+    answers      TEXT NOT NULL,           -- JSON, normalised (see app/intake.py)
+    imported_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (runner_id, submitted_at)
 );
 
 -- Hevy connection per person: their own API key and the secret Hevy sends with each webhook.

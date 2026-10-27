@@ -78,6 +78,7 @@ def _migrate(conn) -> None:
                              ("runs", "device", "TEXT"), ("strength_sessions", "device", "TEXT"),
                              ("runners", "location_name", "TEXT"), ("runners", "latitude", "REAL"),
                              ("runners", "longitude", "REAL"), ("runners", "elevation_m", "REAL"),
+                             ("runners", "intake_code", "TEXT"), ("races", "preset_id", "TEXT"),
                              ("intervals_links", "via_coach", "INTEGER NOT NULL DEFAULT 0"),
                              ("intervals_links", "is_coach", "INTEGER NOT NULL DEFAULT 0"),
                              ("intervals_links", "status", "TEXT NOT NULL DEFAULT 'active'")):

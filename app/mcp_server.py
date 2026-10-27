@@ -18,7 +18,8 @@ from mcp.server.mcpserver import Context, MCPServer
 from datetime import date as _date
 from datetime import datetime as _dt
 
-from . import dex, hermes, ingest, intervals, keyboard, onboarding, paces, plans, queries, record, strength, trends, truepace, upload
+from . import (dex, hermes, ingest, intake, intervals, keyboard, onboarding, paces, plans, queries, racelib,
+               raceplan, record, strength, trends, truepace, upload)
 from .config import settings
 from .db import session
 from .identity import AccessDenied, hash_token, resolve_runner
@@ -538,14 +539,60 @@ def mark_onboarding_step(ctx: Context, step: str) -> str:
 
 
 @mcp.tool()
-def save_race(ctx: Context, name: str, date: str, distance_km: float, note: str = "") -> dict:
-    """Save a race the runner has entered or plans to run. date YYYY-MM-DD."""
+def find_race(ctx: Context, name: str) -> list[dict]:
+    """Look a race up in the race library (SA and UK road races: distance, climb, hills, usual
+    date, start). Use it whenever someone names a race, before save_race. The usual date is only
+    a guide: confirm this year's date with them."""
+    _rid(ctx)
+    return racelib.find(name)
+
+
+@mcp.tool()
+def save_race(ctx: Context, name: str, date: str, distance_km: float, note: str = "",
+              climb_m: float = -1, library_id: str = "") -> dict:
+    """Save a race the runner has entered or plans to run. date YYYY-MM-DD. For a library race
+    (find_race) pass its library_id: distance and climb then come from the library. Otherwise
+    give the total climb in metres if they know it (it decides hill training)."""
     rid = _rid(ctx)
+    lib = racelib.info(library_id) if library_id else None
+    if library_id and lib is None:
+        return {"error": f"{library_id!r} isn't in the race library (use find_race)"}
     try:
         with _write(rid) as conn:
-            return onboarding.save_race(conn, rid, name, date, distance_km, note)
+            return onboarding.save_race(conn, rid, lib["name"] if lib else name, date,
+                                        lib["distance_km"] if lib else distance_km, note,
+                                        ascent_m=lib["climb_m"] if lib else (climb_m if climb_m >= 0 else None),
+                                        preset_id=lib["id"] if lib else None)
     except ValueError as e:
         return {"error": str(e)}
+
+
+@mcp.tool()
+def get_programme_form(ctx: Context) -> dict:
+    """The link to Coach Andy's programme form and this person's TR3D code (they type it in the
+    form). Give both when they ask for a training programme. Coach Andy reviews every answer and
+    writes the programme; you never write one."""
+    rid = _rid(ctx)
+    url = os.environ.get("DEX_FORM_URL", "").strip()
+    if not url:
+        return {"error": "the programme form isn't set up yet; tell them Coach Andy will be in touch"}
+    with _write(rid) as conn:
+        return {"form_url": url, "your_code": intake.code_for(conn, rid)}
+
+
+@mcp.tool()
+def get_my_race_plan(ctx: Context, race: str = "", start_time: str = "06:00") -> dict:
+    """Their race-day pacing plan, if they chose one in the programme form: predicted finish and
+    goal pace (flat, cool conditions), course guide and personal splits for library races, a
+    hill note, and within 15 days of the race the forecast weather and TRUE PACE-adjusted finish
+    and pace. race: part of its name (default: next race). start_time: HH:MM."""
+    rid = _rid(ctx)
+    with session() as conn:
+        form = intake.latest(conn, rid)
+        if not (form and form.get("race_pacing")):
+            return {"error": "a race-day pacing plan isn't part of their programme; it's chosen in Coach Andy's "
+                             "programme form (get_programme_form)"}
+        return raceplan.plan(conn, rid, race, start_time)
 
 
 @mcp.tool()
@@ -745,21 +792,24 @@ def coach_decide(ctx: Context, approval_id: str, decision: str, note: str = "") 
 
 @mcp.tool()
 def coach_dex_draft(ctx: Context, runner: str, race: str = "", weekly_km: float = 0, vdot: float = 0,
-                    long_day: str = "Sun", quality_day: str = "Tue", extra_days: str = "Thu",
-                    profile: str = "conservative", start: str = "") -> str:
-    """Coach only: ask Dex, the run brain, to write a running programme for a runner, to their
-    next race (or the race named). Dex works out weekly km and paces from their record unless
-    weekly_km or vdot is given. extra_days: comma-separated (e.g. "Thu,Sat"). profile:
-    conservative (default) or aggressive (faster build). start: YYYY-MM-DD (default next Monday). Needs at
-    least 6 weeks to the race. The draft comes to Coach Andy as an approval with the Excel file;
-    nothing changes until he approves it. Pass Dex's text on as it is; never write sessions yourself."""
+                    long_day: str = "", quality_day: str = "", extra_days: str = "",
+                    profile: str = "", start: str = "", plan: str = "") -> str:
+    """Coach only: ask Dex, the run brain, to write a running programme for a runner. Leave
+    everything Coach Andy doesn't say empty: Dex takes it from the runner's programme form
+    (race, days, build speed, Couch to 5K, recent race time), then their record (weekly km,
+    time trials), then defaults. plan: "race", "c25k" (Couch to 5K) or "" (the form's choice).
+    extra_days: comma-separated (e.g. "Thu,Sat"). profile: conservative or aggressive. start:
+    YYYY-MM-DD (default next Monday). A race plan needs at least 6 weeks to the race. The draft
+    comes to Coach Andy as an approval with the Excel file; nothing changes until he approves it.
+    Pass Dex's text on as it is; never write sessions yourself."""
     _require_coach(ctx)
     with session() as conn:
         try:
             r = dict(_coach_runner(conn, runner))
             d = dex.draft(conn, r["runner_id"], race_name=race, weekly_km=weekly_km or None, vdot=vdot or None,
-                          long_day=long_day, quality_day=quality_day, extra_days=extra_days, profile=profile,
-                          start=_date.fromisoformat(start) if start else None)
+                          long_day=long_day or None, quality_day=quality_day or None,
+                          extra_days=extra_days or None, profile=profile or None,
+                          start=_date.fromisoformat(start) if start else None, plan=plan)
             p = dex.propose(conn, r["runner_id"], d)
         except (ValueError, dex.DexError) as e:
             return f"Dex couldn't draft it: {e}"
@@ -770,6 +820,32 @@ def coach_dex_draft(ctx: Context, runner: str, race: str = "", weekly_km: float 
     return (p["text"] + "\n\nFirst two weeks:\n" + "\n".join(dex.week_lines(d))
             + f"\n\nReply approve {p['approval_id']} to load it and send it to their watch, or reject "
               f"{p['approval_id']}. To change sessions, edit the Excel file and load it with load-programme --replace.")
+
+
+@mcp.tool()
+def coach_race_plan(ctx: Context, runner: str, race: str = "", start_time: str = "06:00") -> dict:
+    """Coach only: a runner's race-day pacing plan (predicted finish, goal pace, course guide,
+    personal splits, and forecast-adjusted numbers within 15 days of the race)."""
+    _require_coach(ctx)
+    with session() as conn:
+        try:
+            r = _coach_runner(conn, runner)
+        except ValueError as e:
+            return {"error": str(e)}
+        return {"runner": r["name"], **raceplan.plan(conn, r["runner_id"], race, start_time)}
+
+
+@mcp.tool()
+def coach_dex_forms(ctx: Context, runner: str) -> dict:
+    """Coach only: a runner's latest programme form answers and their TR3D code."""
+    _require_coach(ctx)
+    with session() as conn:
+        try:
+            r = _coach_runner(conn, runner)
+        except ValueError as e:
+            return {"error": str(e)}
+        return {"runner": r["name"], "code": intake.code_for(conn, r["runner_id"]),
+                "form": intake.latest(conn, r["runner_id"])}
 
 
 @mcp.tool()

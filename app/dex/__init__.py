@@ -37,6 +37,13 @@ def hilliness(distance_km: float, ascent_m: float | None) -> str:
     return "low" if per_km < 5 else "medium" if per_km < 12 else "high"
 
 
+def race_hilliness(race) -> str:
+    """A library race keeps its hand-set hilliness; any other is worked out from its climb."""
+    from .. import racelib
+    preset = racelib.PRESETS.get(race["preset_id"] or "") if "preset_id" in race.keys() else None
+    return preset["hilliness"] if preset else hilliness(race["distance_km"], race["ascent_m"])
+
+
 def _next_monday(d: date) -> date:
     return d + timedelta(days=(7 - d.weekday()) % 7 or 7)
 
@@ -55,11 +62,14 @@ def _parse_days(text: str) -> list[str]:
 # ---- what Dex knows about the runner ------------------------------------------------------
 
 def inputs(conn, rid: int, *, race_name: str = "", weekly_km: float | None = None,
-           vdot: float | None = None, today: date | None = None) -> dict:
-    """Everything the plan is built from, taken from the record unless Coach Andy gives it."""
+           vdot: float | None = None, today: date | None = None, form: dict | None = None) -> dict:
+    """Everything the plan is built from: what Coach Andy gives, else the record (synced runs,
+    time trials), else the runner's programme form."""
     today = today or date.today()
-    races = conn.execute("SELECT name, date, distance_km, ascent_m FROM races WHERE runner_id=? AND date>?"
+    races = conn.execute("SELECT name, date, distance_km, ascent_m, preset_id FROM races WHERE runner_id=? AND date>?"
                          " ORDER BY date", (rid, today.isoformat())).fetchall()
+    if not race_name and form and form.get("race"):
+        race_name = form["race"]["name"]
     if race_name:
         races = [r for r in races if race_name.strip().lower() in r["name"].lower()]
     if not races:
@@ -67,19 +77,29 @@ def inputs(conn, rid: int, *, race_name: str = "", weekly_km: float | None = Non
                        + " (save one first: save_race or the Races sheet)")
     race = dict(races[0])
     base = queries.baseline(conn, rid, weeks=6, today=today)
-    km = weekly_km if weekly_km is not None else base.get("avg_km_per_week")
+    km, km_from = weekly_km, "given by Coach Andy"
+    if km is None and base.get("avg_km_per_week"):
+        km, km_from = base["avg_km_per_week"], "their last 6 weeks of runs"
+    if km is None and form and form.get("weekly_km") is not None:
+        km, km_from = form["weekly_km"], "their programme form"
     if not km:
-        raise DexError("no recent runs to work out weekly km from; give weekly_km")
-    if vdot is None:
-        bench = paces.best_benchmark(conn, rid, today)
-        if bench is None:
-            raise DexError("no race or time trial on file to set paces from; give vdot, or have them run "
-                           "a flat all-out 5 km first")
-        vdot, vdot_from = bench["vdot"], f"{bench['distance_km']} km on {bench['date']}"
-    else:
+        raise DexError("no recent runs and no programme form to work out weekly km from; give weekly_km")
+    if vdot is not None:
         vdot_from = "given by Coach Andy"
-    return {"race": race, "weekly_km": round(float(km), 1), "vdot": round(float(vdot), 1), "vdot_from": vdot_from,
-            "longest_recent_km": base.get("longest_run_km")}
+    else:
+        bench = paces.best_benchmark(conn, rid, today)
+        recent = (form or {}).get("recent")
+        if bench is not None:
+            vdot, vdot_from = bench["vdot"], f"{bench['distance_km']} km on {bench['date']}"
+        elif recent and (not recent.get("date") or (today - date.fromisoformat(recent["date"])).days <= 183):
+            vdot = round(paces.vdot(recent["distance_km"], recent["time_s"]), 1)
+            vdot_from = f"{recent['distance_km']:g} km in {recent['time_s'] // 60}:{recent['time_s'] % 60:02d} (programme form)"
+        else:
+            raise DexError("no race or time trial on file or in the programme form to set paces from; give vdot, "
+                           "or have them run a flat all-out 5 km first")
+    longest = base.get("longest_run_km") or (form or {}).get("longest_km")
+    return {"race": race, "weekly_km": round(float(km), 1), "weekly_km_from": km_from, "vdot": round(float(vdot), 1),
+            "vdot_from": vdot_from, "longest_recent_km": longest}
 
 
 # ---- heart-rate targets -------------------------------------------------------------------
@@ -111,10 +131,22 @@ def classify(session: str, zones: list[int], max_hr: int | None) -> tuple[str, l
 # ---- the plan --------------------------------------------------------------------------------
 
 def draft(conn, rid: int, *, race_name: str = "", weekly_km: float | None = None, vdot: float | None = None,
-          long_day: str = "Sun", quality_day: str = "Tue", extra_days: str = "Thu",
-          profile: str = "conservative", start: date | None = None, today: date | None = None) -> dict:
-    """Build a programme draft: {"inputs", "summary", "rows", "warnings"}. Writes nothing."""
+          long_day: str | None = None, quality_day: str | None = None, extra_days: str | None = None,
+          profile: str | None = None, start: date | None = None, today: date | None = None,
+          plan: str = "") -> dict:
+    """Build a programme draft: {"inputs", "summary", "rows", "warnings"}. Writes nothing.
+    Anything not given comes from the runner's latest programme form, else the defaults
+    (long Sunday, quality Tuesday, extra Thursday, conservative). plan: "race", "c25k" or ""
+    (the form's choice, else race)."""
+    from .. import intake
     today = today or date.today()
+    form = intake.latest(conn, rid)
+    if (plan or (form or {}).get("goal") or "race") == "c25k":
+        return draft_c25k(conn, rid, days=extra_days, start=start, today=today, form=form)
+    long_day = long_day or (form or {}).get("long_day") or "Sun"
+    quality_day = quality_day or (form or {}).get("quality_day") or "Tue"
+    extra_days = extra_days if extra_days is not None else (",".join(form["extra_days"]) if form else "Thu")
+    profile = profile or (form or {}).get("build") or "conservative"
     if profile not in PROFILES:
         raise DexError(f"profile must be one of {', '.join(PROFILES)}")
     long_ = _parse_days(long_day)
@@ -126,7 +158,7 @@ def draft(conn, rid: int, *, race_name: str = "", weekly_km: float | None = None
         raise DexError("the long run, quality and extra days must all be different days")
     runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (rid,)).fetchone()
     zones = _zones(runner)
-    inp = inputs(conn, rid, race_name=race_name, weekly_km=weekly_km, vdot=vdot, today=today)
+    inp = inputs(conn, rid, race_name=race_name, weekly_km=weekly_km, vdot=vdot, today=today, form=form)
     race = inp["race"]
     race_day = date.fromisoformat(race["date"])
     race_monday = race_day - timedelta(days=race_day.weekday())
@@ -140,7 +172,7 @@ def draft(conn, rid: int, *, race_name: str = "", weekly_km: float | None = None
         first = race_monday - timedelta(weeks=MAX_WEEKS - 1)
         weeks = MAX_WEEKS
     plan = build_full_plan(inp["weekly_km"], inp["vdot"], race_distance(race["distance_km"]), race_day, first,
-                           race_hilliness=hilliness(race["distance_km"], race["ascent_m"]),
+                           race_hilliness=race_hilliness(race),
                            long_run_day=long_[0], quality_day=quality[0], training_profile=profile,
                            extra_training_days=",".join(extra) or "Thu", total_weeks=weeks)
     rows, warnings = [], []
@@ -182,21 +214,79 @@ def draft(conn, rid: int, *, race_name: str = "", weekly_km: float | None = None
         "sessions": len(rows),
         "days": {"long": long_[0], "quality": quality[0], "extra": extra},
         "paces": {k: v for k, v in plan["paces"].items() if k != "vo2x"},
-        "easy_hr_cap": runner["easy_hr_cap"], "profile": profile,
+        "easy_hr_cap": runner["easy_hr_cap"], "profile": profile, "hilliness": race_hilliness(race),
+        "programme_form": form["submitted_at"] if form else None,
+        "race_pacing_plan": bool(form and form.get("race_pacing")),
     }
+    if form and form.get("injuries"):
+        warnings.append(f"programme form, injuries/health: {form['injuries']}")
+    if form and form.get("notes"):
+        warnings.append(f"programme form, notes: {form['notes']}")
     return {"inputs": inp, "summary": summary, "rows": rows, "warnings": warnings}
+
+
+def draft_c25k(conn, rid: int, *, days: str | None = None, start: date | None = None,
+               today: date | None = None, form: dict | None = None) -> dict:
+    """Couch to 5K: 12 weeks of three run/walk sessions (the TR3D engine's schedule), timed by
+    effort, ending with a 5 km time trial that sets paces for a full plan."""
+    from .engine.c25k import TOTAL_WEEKS, build_c25k_week
+    today = today or date.today()
+    chosen = _parse_days(days) if days else [d for d in DAYS if form and d in
+                                             [form.get("long_day"), form.get("quality_day"), *form.get("extra_days", [])]]
+    if len(chosen) < 3:
+        chosen = ["Mon", "Wed", "Fri"]
+    # three days, as evenly spread through the week as their days allow
+    idx = sorted(DAYS.index(d) for d in chosen)
+    pick = min(((a, b, c) for a in idx for b in idx for c in idx if a < b < c),
+               key=lambda t: max(t[1] - t[0], t[2] - t[1], 7 - t[2] + t[0]))
+    run_days = [DAYS[i] for i in pick]
+    first = start or _next_monday(today)
+    first -= timedelta(days=first.weekday())
+    rows = []
+    for wk in range(1, TOTAL_WEEKS + 1):
+        w = build_c25k_week(wk)
+        for n, name in enumerate(run_days):
+            day = first + timedelta(weeks=wk - 1, days=DAYS.index(name))
+            last = wk == TOTAL_WEEKS and n == len(run_days) - 1
+            if last:
+                rows.append({"date": day.isoformat(), "type": "run", "kind": "benchmark", "km": "5",
+                             "description": "5 km time trial — your first non-stop 5 km, at a hard but even effort. "
+                                            "This sets your paces for a full plan.",
+                             "hr_low": "", "hr_high": "", "climb_m": "", "week": str(wk), "phase": "Couch to 5K"})
+                continue
+            rows.append({"date": day.isoformat(), "type": "run", "kind": "easy",
+                         "km": f"{w['estimated_km_per_session']:g}",
+                         "description": f"Run/walk — {w['days']['Mon']['notes']}"[:300],
+                         "hr_low": "", "hr_high": "", "climb_m": "", "week": str(wk), "phase": "Couch to 5K"})
+    warnings = []
+    if form and form.get("injuries"):
+        warnings.append(f"programme form, injuries/health: {form['injuries']}")
+    if form and form.get("notes"):
+        warnings.append(f"programme form, notes: {form['notes']}")
+    summary = {"plan": "c25k", "start": first.isoformat(), "weeks": TOTAL_WEEKS, "days": run_days,
+               "sessions": len(rows), "programme_form": form["submitted_at"] if form else None}
+    return {"inputs": {}, "summary": summary, "rows": rows, "warnings": warnings}
 
 
 def summary_text(name: str, d: dict) -> str:
     s, i = d["summary"], d["inputs"]
-    lines = [f"Dex programme draft for {name}: {s['race']}",
+    if s.get("plan") == "c25k":
+        lines = [f"Dex programme draft for {name}: Couch to 5K",
+                 f"12 weeks from {s['start']}, 3 run/walk sessions a week on {', '.join(s['days'])}",
+                 "Ends with a 5 km time trial in week 12, which gives the paces for a full plan",
+                 f"Programme form: {s['programme_form'] or 'none'}"]
+        return "\n".join(lines + [f"Note: {w}" for w in d["warnings"]])
+    lines = [f"Dex programme draft for {name}: {s['race']} ({s['hilliness']} hills)",
              f"{s['weeks']} weeks from {s['start']} ("
              + ", ".join(f"{k} {v}" for k, v in s["phases"].items()) + ")",
              f"Weekly km {s['weekly_km']['start']:g} -> peak {s['weekly_km']['peak']:g}; longest run "
              f"{s['longest_run_km']:g} km; {s['sessions']} sessions",
              f"Days: long {s['days']['long']}, quality {s['days']['quality']}, extra {', '.join(s['days']['extra'])}",
-             f"Built from {i['weekly_km']:g} km/week and VDOT {i['vdot']:g} ({i['vdot_from']}); profile {s['profile']}",
-             f"Easy pace {s['paces']['easy']}, threshold {s['paces']['threshold']}; easy HR cap {s['easy_hr_cap']}"]
+             f"Built from {i['weekly_km']:g} km/week ({i['weekly_km_from']}) and VDOT {i['vdot']:g} ({i['vdot_from']}); "
+             f"profile {s['profile']}",
+             f"Easy pace {s['paces']['easy']}, threshold {s['paces']['threshold']}; easy HR cap {s['easy_hr_cap']}",
+             f"Programme form: {s['programme_form'] or 'none'}; race-day pacing plan: "
+             f"{'yes' if s['race_pacing_plan'] else 'no'}"]
     lines += [f"Note: {w}" for w in d["warnings"]]
     return "\n".join(lines)
 

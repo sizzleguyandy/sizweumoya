@@ -29,6 +29,18 @@ starts later). Weeks run Monday to Sunday and the race always lands on race day.
    Intervals.icu calendar and tells the runner. To change sessions first, edit the Excel file
    and load it with `load-programme --replace` instead.
 
+## Programme form, race library, Couch to 5K, race pacing
+- Runners fill in the Dex programme form (`docs/DEX_FORM.md`); Dex uses their answers for
+  anything Coach Andy doesn't specify: race, days, build speed, recent race time, Couch to 5K.
+- Race library (`app/racelib`, from TR3D Run Coach): 6 SA and 6 UK races with distance, climb,
+  hilliness, usual date, start point, course guide and personal pacing. Library races keep their
+  hand-set hilliness. Guides are shown without their "Tips for TR3D Runners" sections until
+  those are reviewed (several advise threshold pace for a marathon). Cape Town's usual date in
+  the library is 24 May; check it (the form's date always wins).
+- Couch to 5K: 12 weeks, three run/walk sessions on the runner's best-spread days, ending with
+  a 5 km time trial that sets paces for a full plan.
+- Race-day pacing plan (if chosen in the form): `get_my_race_plan` / `coach_race_plan`.
+
 ## Next
 2. Runners ask Sarah for a programme -> a Dex draft for Coach Andy.
 3. Sunday adjustment of next week (the engine's adaptation rules) as an approval.

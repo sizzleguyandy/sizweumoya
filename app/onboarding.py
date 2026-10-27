@@ -111,14 +111,26 @@ def mark(conn, rid: int, what: str) -> None:
     conn.commit()
 
 
-def save_race(conn, rid: int, name: str, race_date: str, distance_km: float, note: str = "") -> dict:
+def save_race(conn, rid: int, name: str, race_date: str, distance_km: float, note: str = "",
+              ascent_m: float | None = None, preset_id: str | None = None) -> dict:
     d = date.fromisoformat(race_date)
     if d < date.today():
         raise ValueError("that date has already passed")
     if not 1 <= float(distance_km) <= 250:
         raise ValueError("distance must be in km")
-    cur = conn.execute("INSERT INTO races (runner_id, name, date, distance_km, note) VALUES (?,?,?,?,?)",
-                       (rid, name.strip()[:120], d.isoformat(), float(distance_km), (note or "")[:500] or None))
+    if ascent_m is not None and not 0 <= float(ascent_m) <= 10000:
+        raise ValueError("climb must be the total metres of ascent")
+    old = conn.execute("SELECT id FROM races WHERE runner_id=? AND date=? AND lower(name)=lower(?)",
+                       (rid, d.isoformat(), name.strip()[:120])).fetchone()
+    if old:
+        conn.execute("UPDATE races SET distance_km=?, ascent_m=coalesce(?, ascent_m), preset_id=coalesce(?, preset_id),"
+                     " note=coalesce(?, note) WHERE id=?", (float(distance_km), ascent_m, preset_id,
+                                                           (note or "")[:500] or None, old["id"]))
+        conn.commit()
+        return {"race_id": old["id"], "days_to_go": (d - date.today()).days, "updated": True}
+    cur = conn.execute("INSERT INTO races (runner_id, name, date, distance_km, ascent_m, note, preset_id)"
+                       " VALUES (?,?,?,?,?,?,?)", (rid, name.strip()[:120], d.isoformat(), float(distance_km),
+                                                   ascent_m, (note or "")[:500] or None, preset_id))
     conn.commit()
     return {"race_id": cur.lastrowid, "days_to_go": (d - date.today()).days}
 
