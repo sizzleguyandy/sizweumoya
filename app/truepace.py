@@ -13,6 +13,7 @@ are not slowed for altitude (they don't depend on aerobic capacity). Heart rate 
 running: in heat the pace slows and the cap stays.
 """
 import logging
+import os
 import time
 from datetime import datetime, timedelta
 
@@ -20,8 +21,13 @@ import httpx
 
 log = logging.getLogger(__name__)
 
-FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
-GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
+# Free endpoints are for non-commercial use. With OPEN_METEO_API_KEY set (a paid Open-Meteo plan)
+# the same calls go to the customer endpoints with the key.
+_KEY = os.environ.get("OPEN_METEO_API_KEY", "").strip()
+FORECAST_URL = ("https://customer-api.open-meteo.com/v1/forecast" if _KEY
+                else "https://api.open-meteo.com/v1/forecast")
+GEOCODE_URL = ("https://customer-geocoding-api.open-meteo.com/v1/search" if _KEY
+               else "https://geocoding-api.open-meteo.com/v1/search")
 CACHE_S = 1800
 MAX_SLOWDOWN = 20.0         # %: beyond this, pace targets stop meaning much
 _cache: dict = {}
@@ -74,7 +80,7 @@ def _get(url: str, params: dict) -> dict:
     if hit and time.time() - hit[0] < CACHE_S:
         return hit[1]
     try:
-        r = httpx.get(url, params=params, timeout=10)
+        r = httpx.get(url, params={**params, "apikey": _KEY} if _KEY else params, timeout=10)
         r.raise_for_status()
         data = r.json()
     except (httpx.HTTPError, ValueError) as e:
