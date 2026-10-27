@@ -50,7 +50,7 @@ session, drop-downs for type and kind, help on each heading, a filled "Example" 
 `runners.db` is the single source of truth. Each person also has their own complete file,
 `data/runners/<profile>.db`, rebuilt after every change and nightly (`POST /jobs/records`):
 profile, runs, per-km splits, strength sessions and every set, every report and message sent,
-notes (including profile facts and gear), races, plans, weekly and fitness history, alerts and
+notes (including profile facts and gear), races, programme form answers, plans, weekly and fitness history, alerts and
 approvals. Secrets are never copied into it.
 
 Each file also has ready-made views, `weekly_km`, `monthly_km`, `personal_bests` and

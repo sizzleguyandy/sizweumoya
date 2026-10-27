@@ -123,6 +123,18 @@ def _day(v: str) -> str:
     return v
 
 
+def _stamp(ts: str) -> str:
+    """Google Forms' Timestamp column (in the sheet's locale) -> ISO date and time."""
+    ts = (ts or "").strip()
+    for fmt in ("%Y/%m/%d %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%m/%d/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S",
+                "%Y/%m/%d %I:%M:%S %p", "%d/%m/%Y %I:%M:%S %p", "%m/%d/%Y %I:%M:%S %p"):
+        try:
+            return datetime.strptime(ts, fmt).isoformat(timespec="seconds")
+        except ValueError:
+            pass
+    return datetime.now().isoformat(timespec="seconds")
+
+
 def parse(raw: dict) -> dict:
     """One CSV row (question title -> answer) -> checked answers. Raises IntakeError."""
     a = {TITLES[k.strip().lower()]: (v or "").strip() for k, v in raw.items() if k and k.strip().lower() in TITLES}
@@ -130,7 +142,7 @@ def parse(raw: dict) -> dict:
     missing = [t for k, t, _, _, req in QUESTIONS if req and not a.get(k)]
     if missing:
         raise IntakeError("missing answers: " + "; ".join(missing))
-    out = {"code": a["code"].upper().replace(" ", ""), "name": a["name"], "submitted_at": ts or datetime.now().isoformat(timespec="seconds"),
+    out = {"code": a["code"].upper().replace(" ", ""), "name": a["name"], "submitted_at": _stamp(ts),
            "goal": _pick(a["goal"], GOALS, "goal"), "build": _pick(a["build"], BUILDS, "build"),
            "race_pacing": a["race_pacing"].lower().startswith("y"),
            "weekly_km": _num(a["weekly_km"], "weekly km", 0, 250), "longest_km": _num(a["longest_km"], "longest run", 0, 120),

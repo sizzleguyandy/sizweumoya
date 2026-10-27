@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 # table -> how its rows belong to a runner (all carry runner_id).
 TABLES = ("runners", "runs", "run_splits", "strength_sessions", "strength_sets", "messages",
           "weekly_summary", "fitness_checks", "tips_given", "coach_notes", "runner_summary",
-          "races", "plans", "planned_workouts", "approvals", "coach_alerts", "wellness")
+          "races", "plans", "planned_workouts", "approvals", "coach_alerts", "wellness", "dex_intake")
 SECRET_COLUMNS = {"runners": {"mcp_token_hash", "hermes_api_key"}}
 
 # What get_record can return. Each: (SQL after FROM/WHERE runner_id, date column, default order).
@@ -42,7 +42,9 @@ SECTIONS = {
     "messages": ("SELECT date, direction, type, text FROM messages WHERE runner_id=?", "date", "date DESC"),
     "notes": ("SELECT id, date, category, note, status, review_by FROM coach_notes WHERE runner_id=?",
               "date", "date DESC"),
-    "races": ("SELECT name, date, distance_km, ascent_m, note FROM races WHERE runner_id=?", "date", "date"),
+    "races": ("SELECT name, date, distance_km, ascent_m, note, preset_id FROM races WHERE runner_id=?", "date", "date"),
+    "programme_form": ("SELECT submitted_at, answers FROM dex_intake WHERE runner_id=?", "submitted_at",
+                       "submitted_at DESC"),
     "plan": ("SELECT w.date, w.description, w.target, w.status FROM planned_workouts w JOIN plans p"
              " ON p.id=w.plan_id WHERE w.runner_id=? AND p.active=1", "w.date", "w.date"),
     "weekly": ("SELECT * FROM weekly_summary WHERE runner_id=?", "week_start", "week_start DESC"),
@@ -130,7 +132,7 @@ def get_record(conn, rid: int, section: str, since: str = "", until: str = "", l
     args.append(max(1, min(int(limit or 50), 500)))
     items = rows(conn.execute(sql, args))
     for it in items:
-        for k in ("target", "basis"):
+        for k in ("target", "basis", "answers"):
             if isinstance(it.get(k), str) and it[k][:1] in "{[":
                 it[k] = json.loads(it[k])
     return {"section": section, "count": len(items), "items": items}
@@ -141,7 +143,8 @@ def summary(conn, rid: int) -> dict:
     out = {}
     for name, table, col in (("runs", "runs", "date"), ("strength_sessions", "strength_sessions", "date"),
                              ("reports", "messages", "date"), ("notes", "coach_notes", "date"),
-                             ("races", "races", "date"), ("fitness_checks", "fitness_checks", "date")):
+                             ("races", "races", "date"), ("fitness_checks", "fitness_checks", "date"),
+                             ("programme_forms", "dex_intake", "submitted_at")):
         r = conn.execute(f"SELECT COUNT(*) n, MIN({col}) a, MAX({col}) b FROM {table} WHERE runner_id=?",
                          (rid,)).fetchone()
         out[name] = {"count": r["n"], "first": r["a"], "last": r["b"]}

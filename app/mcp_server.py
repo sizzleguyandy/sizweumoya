@@ -409,7 +409,8 @@ def get_my_record(ctx: Context, section: str = "summary", since: str = "", until
     (latest progress status, load flag, taper and lift records in one go), weekly_km,
     monthly_km, personal_bests, lift_records, runs, splits (per-km pace and HR), strength
     (every set), reports (everything sent to them), messages, notes, races, plan, weekly,
-    fitness, tips. since/until (YYYY-MM-DD) apply to the date-based sections.
+    fitness, tips, programme_form (their programme form answers). since/until (YYYY-MM-DD)
+    apply to the date-based sections.
     Example: a question about Sunday's run -> section="splits", since=until=that date."""
     with session() as conn:
         return record.get_record(conn, _rid(ctx), section, since, until, limit)

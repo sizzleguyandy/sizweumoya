@@ -99,3 +99,7 @@ A runner's code: `python -m app.admin intake-code --runner <id>`.
 - **Race-day pacing plan**: Yes unlocks `get_my_race_plan` for them.
 - **Location**: saved for TRUE PACE if none is saved yet.
 - **Injuries / notes**: saved as a health note and shown on every Dex draft.
+
+Every submission is kept in full in the runner's record: table `dex_intake` in runners.db and in
+their own `data/runners/<profile>.db` (rebuilt on import), and Sarah can read it with
+`get_my_record(section="programme_form")`.

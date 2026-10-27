@@ -125,3 +125,20 @@ def test_race_plan_with_race_day_forecast(db, monkeypatch):
     assert "add 4%" in p["splits_note"] and "hills" in p
     c.execute("UPDATE races SET date=?", ((TODAY + timedelta(days=40)).isoformat(),))
     assert raceplan.plan(c, rid)["race_day_weather"].startswith("forecast available from")
+
+
+def test_form_is_in_the_runners_own_record(db, tmp_path):
+    from app import record
+    c, rid, code = db
+    intake.import_rows(c, [_row(code)])
+    got = record.get_record(c, rid, "programme_form")
+    a = got["items"][0]
+    assert a["submitted_at"] == "2026-10-27T10:00:00" and a["answers"]["race"]["preset_id"] == "cape_town_marathon"
+    assert record.get_record(c, rid, "programme_form", since="2026-10-27")["count"] == 1
+    assert record.get_record(c, rid, "summary")["programme_forms"]["count"] == 1
+    import sqlite3
+    f = record.export_runner(c, rid, tmp_path / "tom.db")
+    own = sqlite3.connect(f)
+    row = own.execute("SELECT submitted_at, answers FROM dex_intake").fetchone()
+    assert row[0] == "2026-10-27T10:00:00" and "Achilles" in row[1]
+    assert own.execute("SELECT preset_id FROM races").fetchone()[0] == "cape_town_marathon"
