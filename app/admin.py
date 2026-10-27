@@ -110,6 +110,7 @@ def main() -> None:
     dx.add_argument("--profile", default="conservative", choices=["conservative", "aggressive"])
     dx.add_argument("--start", help="YYYY-MM-DD, default next Monday")
     dx.add_argument("--propose", action="store_true", help="send it to Coach Andy as an approval")
+    dx.add_argument("--test", action="store_true", help="with --propose: mark it TEST everywhere")
     dd = sub.add_parser("dedupe-runs", help="find runs stored twice from different files (--apply removes them)")
     dd.add_argument("--runner", type=int, required=True)
     dd.add_argument("--apply", action="store_true")
@@ -237,9 +238,10 @@ def main() -> None:
         print(dex.summary_text(name, d) + "\n")
         print("\n".join(dex.week_lines(d, weeks=99)))
         if args.propose:
-            p = dex.propose(conn, args.runner, d)
+            p = dex.propose(conn, args.runner, d, test=args.test)
+            label = "TEST Dex draft, do not approve" if args.test else "Dex draft"
             hermes.notify_coach(p["text"] + f"\nReply approve {p['approval_id']} or reject {p['approval_id']}.")
-            hermes.send_telegram_file(settings.coach_chat_id, p["file"], caption=f"Dex draft [{p['approval_id']}]")
+            hermes.send_telegram_file(settings.coach_chat_id, p["file"], caption=f"{label} [{p['approval_id']}]")
             print(f"\nSent to Coach Andy as request {p['approval_id']} ({p['file']}).")
         else:
             print("\nNothing saved. Add --propose to send it to Coach Andy.")

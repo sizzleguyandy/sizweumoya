@@ -645,7 +645,13 @@ def coach_decide(ctx: Context, approval_id: str, decision: str, note: str = "") 
     with session() as conn:
         row = queries.decide_approval(conn, approval_id, decision, note or None)
         if row is None:
-            return "No pending request with that id."
+            old = conn.execute("SELECT a.status, a.decided_at, a.coach_note, a.reason, r.name FROM approvals a"
+                               " JOIN runners r ON r.runner_id=a.runner_id WHERE a.id=?", (approval_id,)).fetchone()
+            if old is None:
+                return "No request with that id exists. Check the id (coach_pending_approvals lists open ones)."
+            return (f"Nothing changed: request {approval_id} ({old['reason']} for {old['name']}) was already "
+                    f"{old['status']} on {old['decided_at']}" + (f" ({old['coach_note']})" if old["coach_note"] else "")
+                    + ". A new request is needed to change that.")
         found = conn.execute("SELECT * FROM runners WHERE runner_id=?", (row["runner_id"],)).fetchone()
         if found is None:
             return f"Recorded: {decision}. Runner row is gone; nothing to notify."
@@ -772,8 +778,8 @@ def _coach_runner(conn, name: str):
 
 @mcp.tool()
 def coach_runner_plan(ctx: Context, runner: str, days: int = 14) -> dict:
-    """Coach only: a runner's programme sessions from 3 days ago to `days` ahead, with weekday,
-    status and targets. `runner` is their name."""
+    """Coach only: a runner's active programmes (id, start, end), upcoming races, and programme
+    sessions from 3 days ago to `days` ahead with weekday, status and targets. `runner` is their name."""
     _require_coach(ctx)
     with session() as conn:
         try:
@@ -783,7 +789,9 @@ def coach_runner_plan(ctx: Context, runner: str, days: int = 14) -> dict:
         out = queries.current_plan(conn, r["runner_id"], max(1, min(days, 90)))
         for w in out["workouts"]:
             w["weekday"] = _date.fromisoformat(w["date"]).strftime("%A")
-        return {"runner": r["name"], **out}
+        progs = [dict(p) for p in conn.execute(
+            "SELECT id, type, start_date, end_date FROM plans WHERE runner_id=? AND active=1", (r["runner_id"],))]
+        return {"runner": r["name"], "active_programmes": progs, "races": plans.races(conn, r["runner_id"]), **out}
 
 
 @mcp.tool()

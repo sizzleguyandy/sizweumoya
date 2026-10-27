@@ -259,3 +259,17 @@ def test_dex_draft_waits_for_approval_then_loads(conn, coach_ctx, delivered, mon
     assert conn.execute("SELECT COUNT(*) FROM plans WHERE active=1 AND type='run'").fetchone()[0] == 1
     _wait_for(delivered)
     assert "Your new programme is in" in delivered[0][1]
+
+
+def test_deciding_twice_says_what_happened(conn, coach_ctx, delivered, monkeypatch):
+    rid, profile, token = add_runner(conn, "Andy", "12345", 186, None)
+    _plan(conn, rid)
+    monkeypatch.setattr(hermes, "notify_coach", lambda text: None)
+    ctx = SimpleNamespace(headers={"x-hermes-profile": profile, "Authorization": f"Bearer {token}"})
+    aid = mcp_server.propose_plan_change(ctx, "r", "p").split("request ")[1].rstrip(").")
+    mcp_server.coach_decide(coach_ctx, aid, "rejected", "test clean-up")
+    again = mcp_server.coach_decide(coach_ctx, aid, "approved")
+    assert again.startswith(f"Nothing changed: request {aid}") and "already rejected" in again and "test clean-up" in again
+    assert mcp_server.coach_decide(coach_ctx, "nope", "approved").startswith("No request with that id")
+    plan = mcp_server.coach_runner_plan(coach_ctx, "andy")
+    assert plan["active_programmes"][0]["start_date"] == "2026-10-20" and plan["races"] == []

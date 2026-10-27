@@ -253,15 +253,17 @@ def drafts_dir():
     return d
 
 
-def propose(conn, rid: int, d: dict) -> dict:
-    """Save the draft as a 'programme' approval for Coach Andy, with the file next to it."""
+def propose(conn, rid: int, d: dict, test: bool = False) -> dict:
+    """Save the draft as a 'programme' approval for Coach Andy, with the file next to it.
+    A test draft says so everywhere, so it's never approved by mistake."""
     r = conn.execute("SELECT name, hermes_profile FROM runners WHERE runner_id=?", (rid,)).fetchone()
-    text = summary_text(r["name"], d)
-    aid = queries.create_approval(conn, rid, "Dex programme draft", text, "programme",
+    text = ("TEST DRAFT, DO NOT APPROVE (it would replace the real programme)\n" if test else "") \
+        + summary_text(r["name"], d)
+    aid = queries.create_approval(conn, rid, "Dex TEST draft" if test else "Dex programme draft", text, "programme",
                                   {"rows": d["rows"], "summary": d["summary"]})
     path = str(drafts_dir() / f"dex-{r['hermes_profile'] or rid}-{aid}.xlsx")
     write_xlsx(d, path)
-    return {"approval_id": aid, "file": path, "text": text}
+    return {"approval_id": aid, "file": path, "text": text, "test": test}
 
 
 def apply(conn, approval: dict) -> dict | None:
