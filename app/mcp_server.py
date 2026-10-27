@@ -16,8 +16,9 @@ from contextlib import contextmanager
 from mcp.server.mcpserver import Context, MCPServer
 
 from datetime import date as _date
+from datetime import datetime as _dt
 
-from . import dex, hermes, ingest, intervals, keyboard, onboarding, paces, plans, queries, record, strength, trends, upload
+from . import dex, hermes, ingest, intervals, keyboard, onboarding, paces, plans, queries, record, strength, trends, truepace, upload
 from .config import settings
 from .db import session
 from .identity import AccessDenied, hash_token, resolve_runner
@@ -270,6 +271,51 @@ def get_current_plan(ctx: Context) -> dict:
     easy_hr_cap (see get_my_profile)."""
     with session() as conn:
         return queries.current_plan(conn, _rid(ctx))
+
+
+@mcp.tool()
+def set_my_location(ctx: Context, place: str) -> str:
+    """Save the town or city where this person usually runs (for TRUE PACE weather). Confirm
+    the place it found with them; if it's the wrong one, try again with the country added."""
+    try:
+        p = truepace.find_place(place)
+    except truepace.WeatherError as e:
+        return f"Not saved: {e}."
+    rid = _rid(ctx)
+    with _write(rid) as conn:
+        conn.execute("UPDATE runners SET location_name=?, latitude=?, longitude=?, elevation_m=? WHERE runner_id=?",
+                     (f"{p['name']}, {p['country']}" if p["country"] else p["name"], p["latitude"], p["longitude"],
+                      p["elevation_m"], rid))
+    return f"Saved: {p['name']}" + (f", {p['country']}" if p["country"] else "") + \
+        (f" ({p['elevation_m']:.0f} m above sea level)." if p["elevation_m"] is not None else ".")
+
+
+@mcp.tool()
+def get_true_pace(ctx: Context, when: str = "", place: str = "") -> dict:
+    """TRUE PACE: their training paces adjusted for the forecast heat, humidity (dew point) and
+    altitude where and when they'll run. when: "YYYY-MM-DD HH:MM" local time (default: the next
+    hour, or 06:00 tomorrow in the evening); up to 16 days ahead. place: somewhere else (a race
+    venue, travelling); default their saved location. Give the weather, the % slowdown and the
+    adjusted paces; easy runs still go by the heart-rate cap. Say it's from a forecast."""
+    rid = _rid(ctx)
+    with session() as conn:
+        r = conn.execute("SELECT * FROM runners WHERE runner_id=?", (rid,)).fetchone()
+        perf = paces.profile(conn, rid)["performance"]
+    try:
+        at = _dt.fromisoformat(when.strip().replace(" ", "T")) if when.strip() else truepace.default_time()
+    except ValueError:
+        return {"error": "when must be YYYY-MM-DD HH:MM"}
+    try:
+        if place.strip():
+            spot = truepace.find_place(place)
+        elif r["latitude"] is not None:
+            spot = {"name": r["location_name"], "latitude": r["latitude"], "longitude": r["longitude"],
+                    "elevation_m": r["elevation_m"]}
+        else:
+            return {"error": "no location saved: ask where they usually run, then set_my_location"}
+        return truepace.true_pace(spot, at, perf, r["easy_hr_cap"])
+    except truepace.WeatherError as e:
+        return {"error": f"{e}; give their normal paces and go by heart rate and feel"}
 
 
 @mcp.tool()

@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS runners (
     watch             TEXT,                   -- brand the runner uses (garmin, coros, ...)
     consent_at        TEXT,                   -- when the runner agreed to the privacy terms
     onboarded_at      TEXT,                   -- when onboarding finished
+    location_name     TEXT,                   -- where they usually run (for TRUE PACE weather)
+    latitude          REAL,
+    longitude         REAL,
+    elevation_m       REAL,
     weight_kg         REAL,
     goal              TEXT,
     units             TEXT NOT NULL DEFAULT 'km',

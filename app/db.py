@@ -76,6 +76,8 @@ def _migrate(conn) -> None:
                              ("approvals", "payload", "TEXT"),
                              ("weekly_summary", "flag_level", "TEXT"), ("weekly_summary", "flags", "TEXT"),
                              ("runs", "device", "TEXT"), ("strength_sessions", "device", "TEXT"),
+                             ("runners", "location_name", "TEXT"), ("runners", "latitude", "REAL"),
+                             ("runners", "longitude", "REAL"), ("runners", "elevation_m", "REAL"),
                              ("intervals_links", "via_coach", "INTEGER NOT NULL DEFAULT 0"),
                              ("intervals_links", "is_coach", "INTEGER NOT NULL DEFAULT 0"),
                              ("intervals_links", "status", "TEXT NOT NULL DEFAULT 'active'")):
