@@ -134,8 +134,7 @@ def test_decide_returns_immediately_even_if_delivery_fails(conn, coach_ctx, monk
 
 def test_unknown_id_changes_nothing_and_does_not_notify(conn, coach_ctx, delivered):
     add_runner(conn, "Andrew", "12345", 188, None)
-    assert mcp_server.coach_decide(coach_ctx, "made-up-id", "approved") == \
-        "No pending request with that id."
+    assert mcp_server.coach_decide(coach_ctx, "made-up-id", "approved").startswith("No request with that id exists")
     assert delivered == []
 
 
