@@ -17,7 +17,6 @@ from .db import rows
 ZONE_NAMES = ["Recovery", "Easy", "Aerobic", "Threshold", "Anaerobic"]
 BENCHMARK_DAYS = 120           # a time trial older than this is too stale for paces
 OBSERVED_WEEKS = 6
-RIEGEL = 1.06                  # race time grows as distance ** 1.06
 RACES = {"5K": 5.0, "10K": 10.0, "Half marathon": 21.0975, "Marathon": 42.195}
 
 # Training intensities as a fraction of VDOT (Daniels).
@@ -51,6 +50,19 @@ def _speed_for_vo2(vo2: float) -> float:
 def pace_at(vdot_: float, fraction: float) -> float:
     """Seconds per km at a fraction of VDOT."""
     return 60_000 / _speed_for_vo2(vdot_ * fraction)
+
+
+def race_time(vdot_: float, distance_km: float) -> float:
+    """Seconds to run distance_km at this VDOT: the time whose VDOT equals it (how Daniels'
+    race tables are built). Flat course, good conditions."""
+    lo, hi = 60.0, 60.0 * 60 * 30
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        if vdot(distance_km, mid) > vdot_:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
 
 
 def zones(runner) -> list[dict]:
@@ -116,7 +128,9 @@ def profile(conn, rid: int, today: date | None = None) -> dict:
             name: {"from": stats.format_pace(pace_at(v, hi)), "to": stats.format_pace(pace_at(v, lo))}
             for name, (lo, hi) in PACE_BANDS.items()},
         "race_estimates": {
-            name: _fmt_time(t * (km / bench["distance_km"]) ** RIEGEL) for name, km in RACES.items()},
+            name: _fmt_time(race_time(vdot(bench["distance_km"], t), km)) for name, km in RACES.items()},
+        "race_estimates_note": "flat course, cool conditions, trained for the distance; hills, heat and "
+                               "a short long run all make the real time slower",
     }
     return out
 

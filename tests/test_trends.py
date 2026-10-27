@@ -149,3 +149,13 @@ def test_session_card_lines_up_and_marks_new_bests():
     assert lines[2] == "Chest press (machine)      35 kg  5 5 7"
     assert lines[3].endswith("5x60  5x70  new best")
     assert lines[4] == "Plank                         BW  45s"
+
+
+def test_vdot_and_race_times_match_daniels_tables():
+    """Rows of the VDOT table in Daniels' Running Formula: 5K, 10K, half, marathon."""
+    from app import paces
+    table = {40: (1448, 3003, 6659, 13785), 50: (1197, 2481, 5495, 11449), 60: (1023, 2122, 4689, 9805)}
+    for v, times in table.items():
+        for km, t in zip((5, 10, 21.0975, 42.195), times):
+            assert abs(paces.vdot(km, t) - v) < 0.15
+            assert abs(paces.race_time(v, km) - t) / t < 0.004      # within 0.4%
