@@ -115,6 +115,10 @@ def load_rows(conn, rid: int, rows_: list[dict], replace: bool = False) -> dict:
         if r.get("steps"):
             # Structured workout for the watch, in Intervals.icu's workout text; "|" starts a new line.
             target["steps"] = "\n".join(x.strip() for x in r["steps"].split("|") if x.strip())
+        if r.get("week"):
+            target["week"] = int(float(r["week"]))
+        if r.get("phase"):
+            target["phase"] = r["phase"][:40]
         if r.get("exercises"):
             target["exercises"] = [e.strip() for e in r["exercises"].split(";") if e.strip()]
         by_type.setdefault(t, []).append({"date": d.isoformat(), "description": r["description"][:300],

@@ -17,7 +17,7 @@ from mcp.server.mcpserver import Context, MCPServer
 
 from datetime import date as _date
 
-from . import hermes, ingest, intervals, keyboard, onboarding, paces, plans, queries, record, strength, trends, upload
+from . import dex, hermes, ingest, intervals, keyboard, onboarding, paces, plans, queries, record, strength, trends, upload
 from .config import settings
 from .db import session
 from .identity import AccessDenied, hash_token, resolve_runner
@@ -651,10 +651,13 @@ def coach_decide(ctx: Context, approval_id: str, decision: str, note: str = "") 
             return f"Recorded: {decision}. Runner row is gone; nothing to notify."
         runner = dict(found)  # detach: the connection closes with this block
         proposal = row["proposal"]
-        applied = None
+        applied = loaded = None
         if decision == "approved":
             onboarding.apply_zones(conn, row)
             applied = _apply_move(conn, row)
+            loaded = dex.apply(conn, row)
+            if loaded and not loaded.get("error"):
+                _resync_calendar(conn, row["runner_id"])
             if row.get("kind") == "intervals":
                 intervals.approve_link(conn, row["runner_id"])
         elif row.get("kind") == "intervals":
@@ -666,6 +669,12 @@ def coach_decide(ctx: Context, approval_id: str, decision: str, note: str = "") 
         note = (note + " " if note else "") + f"(The programme could not be updated: {applied['error']})"
     elif applied:
         note = (note + " " if note else "") + f"(Programme updated: moved to {applied['to']}.)"
+    if loaded:
+        if loaded.get("error"):
+            note = (note + " " if note else "") + f"(The programme could not be loaded: {loaded['error']})"
+        else:
+            note = (note + " " if note else "") + (f"(Your new programme is in: {loaded['sessions']} sessions from "
+                                                  f"{loaded['from']} to {loaded['to']}, and on your watch calendar.)")
     if row.get("kind") == "intervals" and decision == "approved":
         _link_in_background(runner)
         note = (note + " " if note else "") + ("(Once they accept the coaching request in Intervals.icu, "
@@ -675,8 +684,40 @@ def coach_decide(ctx: Context, approval_id: str, decision: str, note: str = "") 
         return (f"Recorded: {decision}. " + (f"Programme NOT updated: {applied['error']}" if applied.get("error")
                 else f"Programme updated: {applied['moved']} moved from {applied['from']} to {applied['to']}.")
                 + " Runner notified.")
+    if loaded:
+        return (f"Recorded: {decision}. " + (f"Programme NOT loaded: {loaded['error']}" if loaded.get("error") else
+                f"Programme loaded: {loaded['sessions']} sessions, {loaded['from']} to {loaded['to']}, calendar updated.")
+                + " Runner notified.")
     return f"Recorded: {decision}. Runner notified."
 
+
+@mcp.tool()
+def coach_dex_draft(ctx: Context, runner: str, race: str = "", weekly_km: float = 0, vdot: float = 0,
+                    long_day: str = "Sun", quality_day: str = "Tue", extra_days: str = "Thu",
+                    profile: str = "conservative", start: str = "") -> str:
+    """Coach only: ask Dex, the run brain, to write a running programme for a runner, to their
+    next race (or the race named). Dex works out weekly km and paces from their record unless
+    weekly_km or vdot is given. extra_days: comma-separated (e.g. "Thu,Sat"). profile:
+    conservative (default) or aggressive (faster build). start: YYYY-MM-DD (default next Monday). Needs at
+    least 6 weeks to the race. The draft comes to Coach Andy as an approval with the Excel file;
+    nothing changes until he approves it. Pass Dex's text on as it is; never write sessions yourself."""
+    _require_coach(ctx)
+    with session() as conn:
+        try:
+            r = dict(_coach_runner(conn, runner))
+            d = dex.draft(conn, r["runner_id"], race_name=race, weekly_km=weekly_km or None, vdot=vdot or None,
+                          long_day=long_day, quality_day=quality_day, extra_days=extra_days, profile=profile,
+                          start=_date.fromisoformat(start) if start else None)
+            p = dex.propose(conn, r["runner_id"], d)
+        except (ValueError, dex.DexError) as e:
+            return f"Dex couldn't draft it: {e}"
+    try:
+        hermes.send_telegram_file(settings.coach_chat_id, p["file"], caption=f"Dex draft for {r['name']} [{p['approval_id']}]")
+    except Exception:
+        log.exception("could not send the Dex draft file")
+    return (p["text"] + "\n\nFirst two weeks:\n" + "\n".join(dex.week_lines(d))
+            + f"\n\nReply approve {p['approval_id']} to load it and send it to their watch, or reject "
+              f"{p['approval_id']}. To change sessions, edit the Excel file and load it with load-programme --replace.")
 
 
 @mcp.tool()

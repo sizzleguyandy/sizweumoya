@@ -230,3 +230,32 @@ def test_coach_can_see_and_move_a_runners_plan(conn, coach_ctx, delivered):
     intruder = SimpleNamespace(headers={"x-hermes-profile": "runner-1", "Authorization": "Bearer nope-000"})
     with pytest.raises(PermissionError):
         mcp_server.coach_move_session(intruder, "andy", "2026-10-24", "2026-10-26")
+
+
+def test_dex_draft_waits_for_approval_then_loads(conn, coach_ctx, delivered, monkeypatch, tmp_path):
+    from datetime import date, timedelta
+
+    from app import dex
+    rid, _, _ = add_runner(conn, "Tom", "12345", 186, None)
+    today = date.today()
+    conn.execute("UPDATE runners SET hr_zones='[132,144,152,162]', easy_hr_cap=144")
+    for i in range(12):
+        conn.execute("INSERT INTO runs (runner_id, activity_key, date, distance_km, duration_s, run_type)"
+                     " VALUES (?,?,?,?,?,?)", (rid, f"fit:{i}", (today - timedelta(days=2 + 3 * i)).isoformat(),
+                                               7.0, 2700, "benchmark" if i == 0 else "easy"))
+    conn.execute("INSERT INTO races (runner_id, name, date, distance_km) VALUES (?,?,?,?)",
+                 (rid, "City 10K", (today + timedelta(days=70)).isoformat(), 10))
+    conn.commit()
+    sent = []
+    monkeypatch.setattr(hermes, "send_telegram_file", lambda chat, path, caption="": sent.append(path))
+    monkeypatch.setattr(dex, "drafts_dir", lambda: tmp_path)
+    assert mcp_server.coach_dex_draft(coach_ctx, "nobody").startswith("Dex couldn't draft it")
+    out = mcp_server.coach_dex_draft(coach_ctx, "tom", extra_days="Thu,Sat")
+    assert out.startswith("Dex programme draft for Tom: City 10K") and "First two weeks:" in out and sent
+    assert conn.execute("SELECT COUNT(*) FROM plans").fetchone()[0] == 0          # nothing loaded yet
+    aid = out.rsplit("reject ", 1)[1].split(".")[0]
+    res = mcp_server.coach_decide(coach_ctx, aid, "approved")
+    assert "Programme loaded" in res
+    assert conn.execute("SELECT COUNT(*) FROM plans WHERE active=1 AND type='run'").fetchone()[0] == 1
+    _wait_for(delivered)
+    assert "Your new programme is in" in delivered[0][1]

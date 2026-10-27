@@ -15,6 +15,7 @@
   python -m app.admin export-record --runner 2 [--to path.db]
   python -m app.admin offboard --runner 2 [--keep-copy path.db]
   INTERVALS_API_KEY=... python -m app.admin intervals-connect --runner 1 --athlete-id i12345
+  python -m app.admin dex-draft --runner 2 [--race "Two Oceans"] [--extra-days Thu,Sat] [--propose]
   python -m app.admin intervals-set-coach --runner 1        # Coach Andy's own key coaches everyone else
   python -m app.admin intervals-link --runner 2 --athlete-id i23456   # athlete accepted Coach Andy as coach
   python -m app.admin intervals-check --runner 2
@@ -98,6 +99,17 @@ def main() -> None:
     ic = sub.add_parser("intervals-connect", help="link Intervals.icu (key read from INTERVALS_API_KEY)")
     ic.add_argument("--runner", type=int, required=True)
     ic.add_argument("--athlete-id", required=True)
+    dx = sub.add_parser("dex-draft", help="Dex, the run brain: draft a running programme for Coach Andy")
+    dx.add_argument("--runner", type=int, required=True)
+    dx.add_argument("--race", default="", help="part of the race name (default: their next race)")
+    dx.add_argument("--weekly-km", type=float)
+    dx.add_argument("--vdot", type=float)
+    dx.add_argument("--long-day", default="Sun")
+    dx.add_argument("--quality-day", default="Tue")
+    dx.add_argument("--extra-days", default="Thu", help='e.g. "Thu,Sat"')
+    dx.add_argument("--profile", default="conservative", choices=["conservative", "aggressive"])
+    dx.add_argument("--start", help="YYYY-MM-DD, default next Monday")
+    dx.add_argument("--propose", action="store_true", help="send it to Coach Andy as an approval")
     dd = sub.add_parser("dedupe-runs", help="find runs stored twice from different files (--apply removes them)")
     dd.add_argument("--runner", type=int, required=True)
     dd.add_argument("--apply", action="store_true")
@@ -214,6 +226,23 @@ def main() -> None:
             raise SystemExit("Set INTERVALS_API_KEY in the environment first (never on the command line).")
         intervals.connect(conn, args.runner, args.athlete_id, key)
         print(f"Runner {args.runner} linked to Intervals.icu athlete {args.athlete_id}.")
+    elif args.cmd == "dex-draft":
+        from datetime import date as _d
+
+        from . import dex
+        d = dex.draft(conn, args.runner, race_name=args.race, weekly_km=args.weekly_km, vdot=args.vdot,
+                      long_day=args.long_day, quality_day=args.quality_day, extra_days=args.extra_days,
+                      profile=args.profile, start=_d.fromisoformat(args.start) if args.start else None)
+        name = conn.execute("SELECT name FROM runners WHERE runner_id=?", (args.runner,)).fetchone()[0]
+        print(dex.summary_text(name, d) + "\n")
+        print("\n".join(dex.week_lines(d, weeks=99)))
+        if args.propose:
+            p = dex.propose(conn, args.runner, d)
+            hermes.notify_coach(p["text"] + f"\nReply approve {p['approval_id']} or reject {p['approval_id']}.")
+            hermes.send_telegram_file(settings.coach_chat_id, p["file"], caption=f"Dex draft [{p['approval_id']}]")
+            print(f"\nSent to Coach Andy as request {p['approval_id']} ({p['file']}).")
+        else:
+            print("\nNothing saved. Add --propose to send it to Coach Andy.")
     elif args.cmd == "dedupe-runs":
         from . import ingest
         pairs = ingest.duplicate_runs(conn, args.runner)
