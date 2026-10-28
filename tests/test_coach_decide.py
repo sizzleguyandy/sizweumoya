@@ -293,3 +293,29 @@ def test_coach_edits_a_session_and_can_make_it_rest(conn, coach_ctx, delivered):
     assert mcp_server.coach_edit_session(coach_ctx, "andy", "2026-10-25", kind="sprint").startswith("Not changed")
     _wait_for(delivered, 2)
     assert "changed your session on Sunday 2026-10-25" in delivered[0][1]
+
+
+def test_second_run_same_day_never_ticks_off_tomorrow(conn):
+    import json as _j
+    from app import plans
+    rid, _, _ = add_runner(conn, "Andy", "12345", 186, None)
+    pid = conn.execute("INSERT INTO plans (runner_id, type, start_date, end_date) VALUES (?,?,?,?)",
+                       (rid, "run", "2026-10-26", "2026-11-15")).lastrowid
+    for d, km in (("2026-10-27", 5), ("2026-10-29", 7)):
+        conn.execute("INSERT INTO planned_workouts (plan_id, runner_id, date, description, target) VALUES (?,?,?,?,?)",
+                     (pid, rid, d, "run", _j.dumps({"kind": "easy", "km": km, "hr_max": 138})))
+    runner = conn.execute("SELECT * FROM runners").fetchone()
+    for key, km in (("fit:half1", 5.75), ("fit:half2", 6.45)):
+        conn.execute("INSERT INTO runs (runner_id, activity_key, date, distance_km, duration_s) VALUES (?,?,?,?,?)",
+                     (rid, key, "2026-10-28", km, 2980))
+        plans.match_run(conn, runner, {"activity_key": key, "date": "2026-10-28", "distance_km": km})
+    st = dict(conn.execute("SELECT date, status FROM planned_workouts").fetchall())
+    assert st == {"2026-10-27": "done", "2026-10-29": "planned"}
+    # deleting the half that completed Tuesday reopens it
+    rid1 = conn.execute("SELECT id FROM runs WHERE activity_key='fit:half1'").fetchone()[0]
+    res = plans.delete_run(conn, rid, rid1)
+    assert res["sessions_reopened"][0]["date"] == "2026-10-27"
+    assert conn.execute("SELECT status, completed_activity_key FROM planned_workouts WHERE date='2026-10-27'"
+                        ).fetchone()[1] is None
+    assert plans.replace_hr_cap(conn, rid, 138, 144) == 2
+    assert all(_j.loads(t)["hr_max"] == 144 for (t,) in conn.execute("SELECT target FROM planned_workouts"))

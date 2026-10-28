@@ -27,6 +27,13 @@ def match_run(conn, runner, run: dict) -> dict | None:
         (rid, (d - timedelta(days=MATCH_DAYS)).isoformat(), (d + timedelta(days=MATCH_DAYS)).isoformat()),
     ).fetchall()
     cands = [w for w in cands if _target(w).get("kind") != "rest"]
+    # A second run on a day that already has one matched is extra running, not tomorrow's
+    # session done early: matching it forward would tick off (and take off the watch) a
+    # session that is still to come.
+    if conn.execute("SELECT 1 FROM planned_workouts w JOIN runs r ON r.activity_key=w.completed_activity_key"
+                    " WHERE w.runner_id=? AND r.date=? AND r.activity_key!=?",
+                    (rid, run["date"], run["activity_key"])).fetchone():
+        cands = [w for w in cands if w["date"] <= run["date"]]
     if not cands:
         return None
     km = run.get("distance_km") or 0
@@ -353,3 +360,36 @@ def edit_session(conn, rid: int, day: str, *, km: float | None = None, kind: str
     return {"date": f"{d:%A} {d.isoformat()}", "before": before, "after": after}
 
 
+
+
+def delete_run(conn, rid: int, run_id: int) -> dict:
+    """Delete one stored run (e.g. half of a run stopped by mistake, once the joined file is in).
+    A programme session it completed goes back to planned (or missed, if its day has passed)."""
+    r = conn.execute("SELECT id, date, distance_km, activity_key FROM runs WHERE id=? AND runner_id=?",
+                     (run_id, rid)).fetchone()
+    if r is None:
+        raise PlanChangeError(f"runner {rid} has no run with id {run_id}")
+    freed = [dict(w) for w in conn.execute("SELECT id, date, description FROM planned_workouts"
+                                           " WHERE completed_activity_key=?", (r["activity_key"],))]
+    for w in freed:
+        conn.execute("UPDATE planned_workouts SET completed_activity_key=NULL, status=? WHERE id=?",
+                     ("missed" if w["date"] < date.today().isoformat() else "planned", w["id"]))
+    conn.execute("DELETE FROM run_splits WHERE run_id=?", (run_id,))
+    conn.execute("DELETE FROM runs WHERE id=?", (run_id,))
+    conn.commit()
+    return {"deleted": dict(r), "sessions_reopened": freed}
+
+
+def replace_hr_cap(conn, rid: int, old: int, new: int) -> int:
+    """Open easy and long sessions still carrying an old heart-rate cap get the new one (after
+    Coach Andy changes the easy cap). Returns how many changed."""
+    n = 0
+    for w in conn.execute("SELECT w.id, w.target FROM planned_workouts w JOIN plans p ON p.id=w.plan_id"
+                          " WHERE w.runner_id=? AND p.active=1 AND w.status IN ('planned','missed')", (rid,)).fetchall():
+        t = _target(w)
+        if t.get("kind") in ("easy", "long") and t.get("hr_max") == old:
+            t["hr_max"] = new
+            conn.execute("UPDATE planned_workouts SET target=? WHERE id=?", (json.dumps(t), w["id"]))
+            n += 1
+    conn.commit()
+    return n

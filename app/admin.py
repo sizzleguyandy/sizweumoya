@@ -27,6 +27,8 @@
   python -m app.admin hevy-import --runner 1 --since 2026-08-01
   python -m app.admin move-session --runner 1 --from 2026-10-23 --to 2026-10-24
   python -m app.admin edit-session --runner 1 --date 2026-11-01 --km 10 --kind easy [--rest]
+  python -m app.admin delete-run --runner 1 --run-id 34
+  python -m app.admin replace-hr-cap --runner 1 --old 138 --new 144
   python -m app.admin purge-strava
   python -m app.admin import-tracker --runner 1 --file tracker.xlsx [--replace]
 """
@@ -162,6 +164,13 @@ def main() -> None:
     es.add_argument("--hr-low", type=int)
     es.add_argument("--hr-high", type=int)
     es.add_argument("--rest", action="store_true", help="make it a rest day (removes it from the calendar)")
+    dr = sub.add_parser("delete-run", help="delete one stored run (its programme session reopens)")
+    dr.add_argument("--runner", type=int, required=True)
+    dr.add_argument("--run-id", type=int, required=True)
+    hc = sub.add_parser("replace-hr-cap", help="open easy/long sessions with an old HR cap get the new one")
+    hc.add_argument("--runner", type=int, required=True)
+    hc.add_argument("--old", type=int, required=True)
+    hc.add_argument("--new", type=int, required=True)
     sub.add_parser("purge-strava", help="delete anything left from the old Strava version")
     t = sub.add_parser("import-tracker")
     t.add_argument("--runner", type=int, required=True)
@@ -231,7 +240,14 @@ def main() -> None:
         if args.max_hr:
             conn.execute("UPDATE runners SET max_hr=? WHERE runner_id=?", (args.max_hr, args.runner))
         if args.easy_cap:
+            from . import plans
+            was = conn.execute("SELECT easy_hr_cap FROM runners WHERE runner_id=?", (args.runner,)).fetchone()[0]
             conn.execute("UPDATE runners SET easy_hr_cap=? WHERE runner_id=?", (args.easy_cap, args.runner))
+            if was and was != args.easy_cap:
+                n = plans.replace_hr_cap(conn, args.runner, was, args.easy_cap)
+                print(f"{n} open easy/long sessions moved from HR {was} to {args.easy_cap}")
+                if n:
+                    _calendar(conn, args.runner)
         conn.commit()
         print(dict(conn.execute("SELECT name, hr_zones, max_hr, easy_hr_cap, zones_locked FROM runners"
                                 " WHERE runner_id=?", (args.runner,)).fetchone()))
@@ -377,6 +393,20 @@ def main() -> None:
             page += 1
         record.export_runner(conn, args.runner)
         print(counts)
+    elif args.cmd == "delete-run":
+        from . import plans
+        try:
+            res = plans.delete_run(conn, args.runner, args.run_id)
+        except plans.PlanChangeError as e:
+            raise SystemExit(str(e))
+        print(json.dumps(res, indent=1))
+        _calendar(conn, args.runner)
+        record.export_runner(conn, args.runner)
+    elif args.cmd == "replace-hr-cap":
+        from . import plans
+        print("sessions changed:", plans.replace_hr_cap(conn, args.runner, args.old, args.new))
+        _calendar(conn, args.runner)
+        record.export_runner(conn, args.runner)
     elif args.cmd == "edit-session":
         from . import plans
         try:
