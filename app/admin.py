@@ -26,6 +26,7 @@
   HEVY_API_KEY=... python -m app.admin hevy-connect --runner 1
   python -m app.admin hevy-import --runner 1 --since 2026-08-01
   python -m app.admin move-session --runner 1 --from 2026-10-23 --to 2026-10-24
+  python -m app.admin edit-session --runner 1 --date 2026-11-01 --km 10 --kind easy [--rest]
   python -m app.admin purge-strava
   python -m app.admin import-tracker --runner 1 --file tracker.xlsx [--replace]
 """
@@ -152,6 +153,15 @@ def main() -> None:
     mv.add_argument("--runner", type=int, required=True)
     mv.add_argument("--from", dest="from_date", required=True)
     mv.add_argument("--to", dest="to_date", required=True)
+    es = sub.add_parser("edit-session", help="Coach Andy: change one programme session (only what's given)")
+    es.add_argument("--runner", type=int, required=True)
+    es.add_argument("--date", required=True)
+    es.add_argument("--km", type=float)
+    es.add_argument("--kind", choices=["easy", "long", "workout", "benchmark", "race"])
+    es.add_argument("--description")
+    es.add_argument("--hr-low", type=int)
+    es.add_argument("--hr-high", type=int)
+    es.add_argument("--rest", action="store_true", help="make it a rest day (removes it from the calendar)")
     sub.add_parser("purge-strava", help="delete anything left from the old Strava version")
     t = sub.add_parser("import-tracker")
     t.add_argument("--runner", type=int, required=True)
@@ -367,6 +377,17 @@ def main() -> None:
             page += 1
         record.export_runner(conn, args.runner)
         print(counts)
+    elif args.cmd == "edit-session":
+        from . import plans
+        try:
+            res = plans.edit_session(conn, args.runner, args.date, km=args.km, kind=args.kind,
+                                     description=args.description, hr_low=args.hr_low, hr_high=args.hr_high,
+                                     rest=args.rest, note="changed by Coach Andy")
+        except plans.PlanChangeError as e:
+            raise SystemExit(str(e))
+        print(json.dumps(res, indent=1))
+        _calendar(conn, args.runner)
+        record.export_runner(conn, args.runner)
     elif args.cmd == "move-session":
         from . import plans
         try:

@@ -244,7 +244,7 @@ def reconcile(conn, rid: int, days: int = 28) -> dict:
             w = conn.execute(
                 "SELECT w.status, p.active FROM planned_workouts w JOIN plans p ON p.id=w.plan_id"
                 " WHERE w.id=? AND w.runner_id=?", (int(ext[len(EXT_PREFIX):]), rid)).fetchone()
-            if w is None or not w["active"]:
+            if w is None or not w["active"] or w["status"] == "cancelled":
                 _check(c.delete(f"/athlete/{link['athlete_id']}/events/{e['id']}"))
                 removed += 1
     return {"sent": sent.get("pushed", 0), "removed": removed}

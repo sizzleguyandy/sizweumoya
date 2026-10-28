@@ -161,7 +161,7 @@ def sessions_around(conn, rid: int, today: date | None = None) -> dict:
         return out
 
     base = ("SELECT w.*, p.type ptype FROM planned_workouts w JOIN plans p ON p.id=w.plan_id"
-            " WHERE w.runner_id=? AND p.active=1 AND ")
+            " WHERE w.runner_id=? AND p.active=1 AND w.status!='cancelled' AND ")
     d = today.isoformat()
     return {
         "today_is": today_info(today),
@@ -215,7 +215,7 @@ def week_vs_programme(conn, rid: int, start: date, end: date, actual: dict) -> d
     compared with everything that was planned for it, not just the second half."""
     ws = conn.execute(
         "SELECT w.* FROM planned_workouts w JOIN plans p ON p.id=w.plan_id WHERE w.runner_id=?"
-        " AND p.active=1 AND p.type='run' AND w.date>=? AND w.date<? ORDER BY w.date",
+        " AND p.active=1 AND p.type='run' AND w.date>=? AND w.date<? AND w.status!='cancelled' ORDER BY w.date",
         (rid, start.isoformat(), end.isoformat())).fetchall()
     cur = conn.execute("SELECT id, start_date FROM plans WHERE runner_id=? AND type='run' AND active=1"
                        " ORDER BY id DESC LIMIT 1", (rid,)).fetchone()
@@ -225,7 +225,8 @@ def week_vs_programme(conn, rid: int, start: date, end: date, actual: dict) -> d
                             " ORDER BY id DESC LIMIT 1", (rid, cur["id"])).fetchone()
         if prev:
             earlier = conn.execute(
-                "SELECT * FROM planned_workouts WHERE plan_id=? AND date>=? AND date<? ORDER BY date",
+                "SELECT * FROM planned_workouts WHERE plan_id=? AND date>=? AND date<? AND status!='cancelled'"
+                " ORDER BY date",
                 (prev["id"], start.isoformat(), first)).fetchall()
             ws = list(earlier) + list(ws)
     if not ws:
@@ -286,3 +287,69 @@ def move_session(conn, rid: int, from_date: str, to_date: str, note: str = "") -
         " AND p.active=1 AND w.date=? AND w.id!=?", (rid, b.isoformat(), w["id"]))]
     return {"moved": w["description"], "from": f"{a:%A} {a.isoformat()}", "to": f"{b:%A} {b.isoformat()}",
             "also_on_that_day": others}
+EDIT_KINDS = ("easy", "long", "workout", "benchmark", "race")
+
+
+def edit_session(conn, rid: int, day: str, *, km: float | None = None, kind: str | None = None,
+                 description: str | None = None, hr_low: int | None = None, hr_high: int | None = None,
+                 rest: bool = False, note: str = "") -> dict:
+    """Change one open session of the active programme: distance, kind, description, heart
+    rate, or make it a rest day (cancelled; it leaves the calendar). Coach decisions only.
+    Structured watch steps are dropped when the distance or kind changes (they would no
+    longer match); easy runs get a fresh one-step workout on the next calendar update."""
+    try:
+        d = date.fromisoformat(day)
+    except ValueError:
+        raise PlanChangeError("date must be YYYY-MM-DD") from None
+    ws = conn.execute(
+        "SELECT w.*, p.type ptype FROM planned_workouts w JOIN plans p ON p.id=w.plan_id WHERE w.runner_id=?"
+        " AND p.active=1 AND w.date=? AND w.status IN ('planned','missed')", (rid, d.isoformat())).fetchall()
+    if not ws:
+        raise PlanChangeError(f"no open session on {d:%A} {d.isoformat()}")
+    if len(ws) > 1:
+        runs = [w for w in ws if w["ptype"] == "run"]
+        if len(runs) != 1:
+            raise PlanChangeError(f"more than one session on {d.isoformat()}; change it in the programme file")
+        ws = runs
+    w = ws[0]
+    t = _target(w)
+    before = {"description": w["description"], "km": t.get("km"), "kind": t.get("kind"),
+              "hr_range": t.get("hr_range"), "hr_max": t.get("hr_max")}
+    if rest:
+        conn.execute("UPDATE planned_workouts SET status='cancelled', target=? WHERE id=?",
+                     (json.dumps({**t, "change_note": (note or "made a rest day")[:200]}), w["id"]))
+        conn.commit()
+        return {"date": f"{d:%A} {d.isoformat()}", "before": before, "after": "rest day (session removed)"}
+    if kind is not None:
+        if kind not in EDIT_KINDS:
+            raise PlanChangeError(f"kind must be one of {', '.join(EDIT_KINDS)}")
+        if kind != t.get("kind"):
+            t.pop("steps", None)
+        t["kind"] = kind
+        if kind in ("easy", "long"):
+            t.pop("hr_range", None)
+    if km is not None:
+        if not 0 < km <= 100:
+            raise PlanChangeError("distance must be in km")
+        if km != t.get("km"):
+            t.pop("steps", None)
+        t["km"] = round(float(km), 1)
+    if hr_high:
+        if hr_low:
+            if not 80 <= hr_low < hr_high <= 230:
+                raise PlanChangeError("heart rate range must be low-high, e.g. 152-162")
+            t["hr_range"] = [int(hr_low), int(hr_high)]
+            t.pop("hr_max", None)
+        else:
+            t["hr_max"] = int(hr_high)
+            t.pop("hr_range", None)
+    desc = (description or "").strip()[:300] or w["description"]
+    t["change_note"] = (note or "changed by Coach Andy")[:200]
+    conn.execute("UPDATE planned_workouts SET description=?, target=?, status='planned' WHERE id=?",
+                 (desc, json.dumps(t), w["id"]))
+    conn.commit()
+    after = {"description": desc, "km": t.get("km"), "kind": t.get("kind"), "hr_range": t.get("hr_range"),
+             "hr_max": t.get("hr_max")}
+    return {"date": f"{d:%A} {d.isoformat()}", "before": before, "after": after}
+
+

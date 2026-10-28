@@ -272,3 +272,24 @@ def test_deciding_twice_says_what_happened(conn, coach_ctx, delivered, monkeypat
     assert mcp_server.coach_decide(coach_ctx, "nope", "approved").startswith("No request with that id")
     plan = mcp_server.coach_runner_plan(coach_ctx, "andy")
     assert plan["active_programmes"][0]["start_date"] == "2026-10-20" and plan["races"] == []
+
+
+def test_coach_edits_a_session_and_can_make_it_rest(conn, coach_ctx, delivered):
+    import json as _j
+    from datetime import date as _d
+    from app import plans
+    rid, _, _ = add_runner(conn, "Andy", "12345", 186, None)
+    _plan(conn, rid)
+    out = mcp_server.coach_edit_session(coach_ctx, "andy", "2026-10-25", km=8, kind="long",
+                                        description="Long run, shortened", hr_high=144)
+    assert out.startswith("Changed Sunday 2026-10-25: Long run -> Long run, shortened, 8 km, HR under 144")
+    t = _j.loads(conn.execute("SELECT target FROM planned_workouts WHERE date='2026-10-25'").fetchone()[0])
+    assert t["km"] == 8 and t["kind"] == "long" and t["hr_max"] == 144
+    assert mcp_server.coach_edit_session(coach_ctx, "andy", "2026-10-23", rest=True).endswith("runner notified.")
+    assert conn.execute("SELECT status FROM planned_workouts WHERE date='2026-10-23'").fetchone()[0] == "cancelled"
+    vs = plans.week_vs_programme(conn, rid, _d(2026, 10, 19), _d(2026, 10, 26), {"total_km": 0})
+    assert vs["sessions_planned"] == 1 and vs["planned_km"] == 8          # the rest day no longer counts
+    assert mcp_server.coach_edit_session(coach_ctx, "andy", "2026-10-23", km=5).startswith("Not changed")
+    assert mcp_server.coach_edit_session(coach_ctx, "andy", "2026-10-25", kind="sprint").startswith("Not changed")
+    _wait_for(delivered, 2)
+    assert "changed your session on Sunday 2026-10-25" in delivered[0][1]

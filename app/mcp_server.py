@@ -824,6 +824,34 @@ def coach_dex_draft(ctx: Context, runner: str, race: str = "", weekly_km: float 
 
 
 @mcp.tool()
+def coach_edit_session(ctx: Context, runner: str, date: str, km: float = 0, kind: str = "",
+                       description: str = "", hr_low: int = 0, hr_high: int = 0, rest: bool = False) -> str:
+    """Coach only: change one of a runner's programme sessions (date YYYY-MM-DD): km, kind (easy,
+    long, workout, benchmark, race), description, heart rate (hr_high alone = a cap, both = a
+    range), or rest=true to make it a rest day. Give only what changes. Updates their programme
+    and watch calendar and tells the runner. Use coach_runner_plan first to see the session."""
+    _require_coach(ctx)
+    with session() as conn:
+        try:
+            r = dict(_coach_runner(conn, runner))
+            res = plans.edit_session(conn, r["runner_id"], date, km=km or None, kind=kind or None,
+                                     description=description or None, hr_low=hr_low or None,
+                                     hr_high=hr_high or None, rest=rest, note="changed by Coach Andy")
+        except (ValueError, plans.PlanChangeError) as e:
+            return f"Not changed: {e}"
+        _resync_calendar(conn, r["runner_id"], date)
+    record.schedule_export(r["runner_id"])
+    a = res["after"]
+    now = a if isinstance(a, str) else (f"{a['description']}" + (f", {a['km']:g} km" if a.get("km") else "")
+                                         + (f", HR {a['hr_range'][0]}-{a['hr_range'][1]}" if a.get("hr_range") else "")
+                                         + (f", HR under {a['hr_max']}" if a.get("hr_max") else ""))
+    _deliver_in_background(r, f"Coach Andy has changed your session on {res['date']}: it was "
+                           f"\"{res['before']['description']}\" and is now {now}. Tell the runner briefly.",
+                           "coach-edit")
+    return f"Changed {res['date']}: {res['before']['description']} -> {now}. Watch calendar updated, runner notified."
+
+
+@mcp.tool()
 def coach_race_plan(ctx: Context, runner: str, race: str = "", start_time: str = "06:00") -> dict:
     """Coach only: a runner's race-day pacing plan (predicted finish, goal pace, course guide,
     personal splits, and forecast-adjusted numbers within 15 days of the race)."""
