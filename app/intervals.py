@@ -234,7 +234,10 @@ def reconcile(conn, rid: int, days: int = 28) -> dict:
     sent = push(conn, rid, start=start, days=days)
     link = link_for(conn, rid)
     removed = 0
+    moved = done_on_other_days(conn, rid)
     with _client(link) as c:
+        if moved:
+            _check(c.post(f"/athlete/{link['athlete_id']}/events/bulk", params={"upsert": "true"}, json=moved))
         events = _check(c.get(f"/athlete/{link['athlete_id']}/events",
                               params={"oldest": start.isoformat(), "newest": end.isoformat()})).json()
         for e in events:
@@ -247,7 +250,24 @@ def reconcile(conn, rid: int, days: int = 28) -> dict:
             if w is None or not w["active"] or w["status"] == "cancelled":
                 _check(c.delete(f"/athlete/{link['athlete_id']}/events/{e['id']}"))
                 removed += 1
-    return {"sent": sent.get("pushed", 0), "removed": removed}
+    return {"sent": sent.get("pushed", 0), "removed": removed, "redated": len(moved)}
+
+
+def done_on_other_days(conn, rid: int, back_days: int = 21) -> list[dict]:
+    """Sessions done on a different day from the one planned (a run a day late, or credited to
+    a nearby session): their calendar entry moves to the day of the run, so Intervals.icu pairs
+    it with the activity instead of showing it as missed."""
+    runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (rid,)).fetchone()
+    out = []
+    for w in conn.execute(
+            "SELECT w.*, p.type ptype, r.date run_date FROM planned_workouts w JOIN plans p ON p.id=w.plan_id"
+            " JOIN runs r ON r.activity_key=w.completed_activity_key WHERE w.runner_id=? AND p.active=1"
+            " AND w.status='done' AND r.date!=w.date AND r.date>=?",
+            (rid, (date.today() - timedelta(days=back_days)).isoformat())).fetchall():
+        e = to_event(w, runner)
+        e["start_date_local"] = f"{w['run_date']}T00:00:00"
+        out.append(e)
+    return out
 
 
 # ---- pull: activities and wellness ----------------------------------------------------

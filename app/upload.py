@@ -84,6 +84,8 @@ def _fit_blobs(real: Path) -> list[tuple[str, bytes]]:
 def process_blob(conn, runner, name: str, data: bytes, note: str = "") -> dict:
     key = "fit:" + hashlib.sha256(data).hexdigest()
     already = ingest.exists(conn, key)
+    if already == "deleted":
+        return {"file": name, "status": "skipped", "reason": "Coach Andy deleted this activity; it isn't imported again"}
     if already:
         return {"file": name, "status": "duplicate", "kind": already}
     try:

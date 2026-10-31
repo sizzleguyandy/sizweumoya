@@ -17,9 +17,10 @@ from mcp.server.mcpserver import Context, MCPServer
 
 from datetime import date as _date
 from datetime import datetime as _dt
+from datetime import timedelta
 
 from . import (dex, hermes, ingest, intake, intervals, keyboard, onboarding, paces, plans, queries, racelib,
-               raceplan, record, strength, trends, truepace, upload)
+               raceplan, record, stats, strength, trends, truepace, upload)
 from .config import settings
 from .db import session
 from .identity import AccessDenied, hash_token, resolve_runner
@@ -849,6 +850,62 @@ def coach_edit_session(ctx: Context, runner: str, date: str, km: float = 0, kind
                            f"\"{res['before']['description']}\" and is now {now}. Tell the runner briefly.",
                            "coach-edit")
     return f"Changed {res['date']}: {res['before']['description']} -> {now}. Watch calendar updated, runner notified."
+
+
+@mcp.tool()
+def coach_week_summary(ctx: Context, runner: str, week_start: str = "") -> dict:
+    """Coach only: a runner's week report (the same numbers they get): km, time, runs, zones,
+    load flag, strength, and against their programme. week_start YYYY-MM-DD (a Monday; default
+    this week)."""
+    _require_coach(ctx)
+    with session() as conn:
+        try:
+            r = _coach_runner(conn, runner)
+            start = _date.fromisoformat(week_start) if week_start else None
+        except ValueError as e:
+            return {"error": str(e)}
+        return {"runner": r["name"], "today_is": plans.today_info(), **queries.week_summary(conn, r["runner_id"], start)}
+
+
+@mcp.tool()
+def coach_runner_runs(ctx: Context, runner: str, days: int = 14) -> dict:
+    """Coach only: a runner's stored runs from the last `days` days, newest first, with their
+    id (for coach_delete_run), distance, time, pace, heart rate and the session each completed."""
+    _require_coach(ctx)
+    with session() as conn:
+        try:
+            r = _coach_runner(conn, runner)
+        except ValueError as e:
+            return {"error": str(e)}
+        since = (_date.today() - timedelta(days=max(1, min(days, 120)))).isoformat()
+        runs = [dict(x) for x in conn.execute(
+            "SELECT r.id, r.date, r.distance_km, r.duration_s, r.avg_pace_s_km, r.avg_hr, r.max_hr, r.elevation_m,"
+            " r.source, (SELECT w.date || ' ' || w.description FROM planned_workouts w"
+            "  WHERE w.completed_activity_key=r.activity_key LIMIT 1) completed_session"
+            " FROM runs r WHERE r.runner_id=? AND r.date>=? ORDER BY r.date DESC, r.id DESC", (r["runner_id"], since))]
+        for x in runs:
+            x["pace"] = stats.format_pace(x.pop("avg_pace_s_km"))
+        return {"runner": r["name"], "runs": runs}
+
+
+@mcp.tool()
+def coach_delete_run(ctx: Context, runner: str, run_id: int) -> str:
+    """Coach only: delete one stored run (by its id from coach_runner_runs), e.g. the halves of a
+    run that was stopped by mistake once the joined run is in. The session it completed reopens,
+    and the file is never imported again. Only after Coach Andy has confirmed that exact run."""
+    _require_coach(ctx)
+    with session() as conn:
+        try:
+            r = dict(_coach_runner(conn, runner))
+            res = plans.delete_run(conn, r["runner_id"], int(run_id))
+        except (ValueError, plans.PlanChangeError) as e:
+            return f"Not deleted: {e}"
+        _resync_calendar(conn, r["runner_id"])
+    record.schedule_export(r["runner_id"])
+    d = res["deleted"]
+    reopened = "; ".join(f"{w['date']} {w['description']}" for w in res["sessions_reopened"])
+    return (f"Deleted {r['name']}'s run of {d['distance_km']} km on {d['date']}."
+            + (f" Reopened: {reopened}." if reopened else "") + " It won't be imported again.")
 
 
 @mcp.tool()

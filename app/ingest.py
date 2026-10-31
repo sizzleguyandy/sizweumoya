@@ -29,6 +29,8 @@ def exists(conn, key: str) -> str | None:
         return "run"
     if conn.execute("SELECT 1 FROM strength_sessions WHERE activity_key=?", (key,)).fetchone():
         return "strength"
+    if conn.execute("SELECT 1 FROM deleted_activities WHERE activity_key=?", (key,)).fetchone():
+        return "deleted"
     return None
 
 

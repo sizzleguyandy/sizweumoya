@@ -140,7 +140,7 @@ def test_reconcile_updates_and_removes_only_our_stale_entries(db, monkeypatch):
         return httpx.Response(200, json={})
     mock(monkeypatch, handler)
     res = intervals.reconcile(c, rid)
-    assert res == {"sent": 3, "removed": 1}
+    assert res == {"sent": 3, "removed": 1, "redated": 0}
     assert ("DELETE", "/api/v1/athlete/i12345/events/12") in calls
     assert not any(m == "DELETE" and p.endswith(("/11", "/13", "/14")) for m, p in calls)
     # a session Coach Andy made a rest day: not sent, and its entry goes
@@ -148,7 +148,7 @@ def test_reconcile_updates_and_removes_only_our_stale_entries(db, monkeypatch):
     plans.edit_session(c, rid, c.execute("SELECT date FROM planned_workouts WHERE id=?", (ids[0],)).fetchone()[0],
                        rest=True)
     calls.clear()
-    assert intervals.reconcile(c, rid) == {"sent": 2, "removed": 2}
+    assert intervals.reconcile(c, rid) == {"sent": 2, "removed": 2, "redated": 0}
     assert ("DELETE", "/api/v1/athlete/i12345/events/11") in calls
     c.execute("UPDATE planned_workouts SET status='planned' WHERE id=?", (ids[0],))
     # a replaced programme: its entries go

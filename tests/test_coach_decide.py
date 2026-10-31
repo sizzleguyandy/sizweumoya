@@ -319,3 +319,40 @@ def test_second_run_same_day_never_ticks_off_tomorrow(conn):
                         ).fetchone()[1] is None
     assert plans.replace_hr_cap(conn, rid, 138, 144) == 2
     assert all(_j.loads(t)["hr_max"] == 144 for (t,) in conn.execute("SELECT target FROM planned_workouts"))
+
+
+def test_coach_sees_week_and_runs_and_deletes_a_run_for_good(conn, coach_ctx, delivered, tmp_path, monkeypatch):
+    from datetime import date as _d, datetime as _dt, timedelta as _td, timezone as _tz
+    from app import config, upload
+    from tests.fitgen import run_fit
+    rid, profile, _ = add_runner(conn, "Andy", "12345", 186, None)
+    runner = conn.execute("SELECT * FROM runners").fetchone()
+    when = _dt.now(_tz.utc).replace(hour=5, minute=0, second=0, microsecond=0) - _td(days=1)
+    half = run_fit(when, seconds=1500)
+    assert upload.process_blob(conn, runner, "half.fit", half)["status"] == "stored"
+    runs = mcp_server.coach_runner_runs(coach_ctx, "andy")["runs"]
+    assert len(runs) == 1 and runs[0]["distance_km"] == 4.5
+    assert "total_km" in mcp_server.coach_week_summary(coach_ctx, "andy")
+    out = mcp_server.coach_delete_run(coach_ctx, "andy", runs[0]["id"])
+    assert out.startswith("Deleted Andy's run of 4.5 km") and "won't be imported again" in out
+    again = upload.process_blob(conn, runner, "half-again.fit", half)        # e.g. the hourly sync
+    assert again["status"] == "skipped" and "deleted" in again["reason"]
+    assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+    assert mcp_server.coach_delete_run(coach_ctx, "andy", 999).startswith("Not deleted")
+
+
+def test_session_done_on_another_day_moves_on_the_calendar(conn):
+    import json as _j
+    from datetime import date as _d, timedelta as _td
+    from app import intervals
+    rid, _, _ = add_runner(conn, "Andy", "12345", 186, None)
+    tue, wed = (_d.today() - _td(days=2)).isoformat(), (_d.today() - _td(days=1)).isoformat()
+    pid = conn.execute("INSERT INTO plans (runner_id, type, start_date, end_date) VALUES (?,?,?,?)",
+                       (rid, "run", tue, wed)).lastrowid
+    conn.execute("INSERT INTO runs (runner_id, activity_key, date, distance_km, duration_s) VALUES (?,?,?,?,?)",
+                 (rid, "fit:x", wed, 12.2, 5962))
+    conn.execute("INSERT INTO planned_workouts (plan_id, runner_id, date, description, target, status,"
+                 " completed_activity_key) VALUES (?,?,?,?,?,?,?)",
+                 (pid, rid, tue, "Easy run", _j.dumps({"kind": "easy", "km": 5}), "done", "fit:x"))
+    ev = intervals.done_on_other_days(conn, rid)
+    assert len(ev) == 1 and ev[0]["start_date_local"] == f"{wed}T00:00:00" and ev[0]["external_id"].startswith("sizwe-")

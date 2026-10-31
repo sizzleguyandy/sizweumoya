@@ -185,6 +185,16 @@ CREATE TABLE IF NOT EXISTS races (
     preset_id   TEXT                      -- race library id (app/racelib), when it's a library race
 );
 
+-- Runs Coach Andy deleted (e.g. halves of a run joined into one): never imported again,
+-- whichever way the file comes back (Intervals.icu sync, a re-sent file).
+CREATE TABLE IF NOT EXISTS deleted_activities (
+    activity_key TEXT PRIMARY KEY,
+    runner_id    INTEGER NOT NULL REFERENCES runners(runner_id) ON DELETE CASCADE,
+    date         TEXT,
+    distance_km  REAL,
+    deleted_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Answers from the Dex programme form (Google Form), one row per submission.
 CREATE TABLE IF NOT EXISTS dex_intake (
     id           INTEGER PRIMARY KEY,
