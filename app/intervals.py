@@ -270,6 +270,24 @@ def done_on_other_days(conn, rid: int, back_days: int = 21) -> list[dict]:
     return out
 
 
+# ---- runs sent as files: onto the calendar too ------------------------------------------
+
+def upload_activity(conn, rid: int, name: str, data: bytes, activity_key: str) -> dict:
+    """Put a run that came as a file (sent to Sarah, not synced from the watch) on the person's
+    Intervals.icu calendar, so the calendar shows everything they ran, plan or no plan.
+    external_id is our file key, so the same file is never added twice."""
+    link = link_for(conn, rid)
+    with _client(link) as c:
+        r = c.post(f"/athlete/{link['athlete_id']}/activities",
+                   params={"external_id": f"sizwe-{activity_key}"[:120]},
+                   files={"file": (name if name.lower().endswith(".fit") else f"{name}.fit", data)})
+    if r.status_code == 409:
+        return {"status": "already on the calendar"}
+    _check(r)
+    body = r.json() if r.content else {}
+    return {"status": "uploaded", "id": body.get("id") if isinstance(body, dict) else None}
+
+
 # ---- pull: activities and wellness ----------------------------------------------------
 
 def from_strava(activity: dict) -> bool:

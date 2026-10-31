@@ -534,3 +534,41 @@ def test_tools_state_today(env):
     conn, runner, _, _ = env
     s = plans.sessions_around(conn, runner["runner_id"], date(2026, 10, 24))
     assert s["today_is"] == {"date": "2026-10-24", "weekday": "Saturday", "tomorrow": "Sunday 2026-10-25"}
+
+
+def test_file_sent_to_sarah_goes_on_the_intervals_calendar(env, monkeypatch):
+    import time
+    from app import intervals
+    conn, runner, folder, _ = env
+    sent = []
+    monkeypatch.setattr(intervals, "upload_activity", lambda c, rid, name, data, key: sent.append((rid, name, key)))
+    path = _save(folder, "run.fit", run_fit(_start(), seconds=1500))
+    assert "calendar" not in upload.process_path(conn, runner, path)           # not linked: nothing sent
+    conn.execute("INSERT INTO intervals_links (runner_id, athlete_id, api_key) VALUES (?, 'i1', 'k-123456789')",
+                 (runner["runner_id"],))
+    conn.commit()
+    res = upload.process_path(conn, runner, _save(folder, "run2.fit", run_fit(_start(days_ago=2), seconds=1500)))
+    assert res["calendar"].startswith("being added")
+    for _ in range(100):
+        if sent:
+            break
+        time.sleep(0.02)
+    assert sent and sent[0][1] == "run2.fit" and sent[0][2].startswith("fit:")
+    assert upload.process_path(conn, runner, path)["duplicates"] == 1 and len(sent) == 1   # a duplicate isn't re-sent
+
+
+def test_upload_activity_posts_the_file(monkeypatch):
+    import httpx
+    from app import intervals
+    seen = []
+
+    def handler(req):
+        seen.append(req)
+        return httpx.Response(201, json={"id": "i9"})
+    monkeypatch.setattr(intervals, "link_for", lambda conn, rid: {"athlete_id": "i1", "api_key": "k"})
+    monkeypatch.setattr(intervals, "_client", lambda link: httpx.Client(base_url="https://intervals.icu/api/v1",
+                                                                       transport=httpx.MockTransport(handler)))
+    out = intervals.upload_activity(None, 1, "run.fit", b"FITDATA", "fit:abc")
+    assert out == {"status": "uploaded", "id": "i9"}
+    assert seen[0].url.path == "/api/v1/athlete/i1/activities" and "external_id=sizwe-fit%3Aabc" in str(seen[0].url)
+    assert b"FITDATA" in seen[0].content

@@ -56,6 +56,13 @@ Then schedule `POST /jobs/intervals-sync` hourly at an odd minute (e.g. :17).
 Automatic debriefs for pulled activities stay off (`INTERVALS_AI_ALLOWED=0`) until the
 Intervals.icu API terms have been checked.
 
+## Everything they run is on the calendar
+Runs recorded on the watch reach Intervals.icu through the watch's own app (Zepp, Garmin
+Connect...), plan or no plan. Runs sent to Sarah as a file are uploaded to their Intervals.icu
+calendar too (external_id `sizwe-fit:<hash>`, so never twice), and the hourly pull sees them as
+already stored. Sessions done on another day move to the day of the run, so they pair with the
+activity instead of showing as missed. Runs Coach Andy deletes are never imported again.
+
 ## Keeping the calendar in step
 Every programme change (a move approved by Coach Andy, `coach_move_session`, `move-session`,
 `set-steps`, `load-programme`, `import-tracker`) updates the Intervals.icu calendar straight away,

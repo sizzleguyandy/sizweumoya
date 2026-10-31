@@ -139,4 +139,27 @@ def process_path(conn, runner, path: str, note: str = "") -> dict:
         summary["activity"] = results[0]
     else:
         summary["history_import"] = True
+    to_send = [(name, data, r) for (name, data), r in zip(blobs, results)
+               if r["status"] == "stored" and r["kind"] in ("run", "strength")]
+    if to_send and conn.execute("SELECT 1 FROM intervals_links WHERE runner_id=? AND status='active'",
+                                (runner["runner_id"],)).fetchone():
+        _calendar_in_background(runner["runner_id"], to_send)
+        summary["calendar"] = "being added to their Intervals.icu calendar"
     return summary
+
+
+def _calendar_in_background(rid: int, items: list) -> None:
+    """Files sent to Sarah go onto the Intervals.icu calendar too (watch syncs are already there)."""
+    import threading
+
+    def _work() -> None:
+        from . import intervals
+        from .db import session
+        for name, data, _ in items:
+            try:
+                with session() as conn:
+                    intervals.upload_activity(conn, rid, name, data, "fit:" + hashlib.sha256(data).hexdigest())
+            except Exception:
+                log.exception("could not put %s on runner %s's Intervals.icu calendar", name, rid)
+
+    threading.Thread(target=_work, name=f"calendar-upload-{rid}", daemon=True).start()
