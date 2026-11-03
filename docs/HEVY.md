@@ -17,4 +17,4 @@ replaces it here. Hevy's API needs **Hevy Pro**; it may change without notice.
    `http://127.0.0.1:8000/hevy/webhook`.
 5. Past workouts: `python -m app.admin hevy-import --runner 1 --since 2026-08-01`
 
-Only paid tiers can connect. The API key never goes into the personal record file.
+Open to every plan (their Hevy account needs Hevy Pro for API access). The API key never goes into the personal record file.

@@ -28,6 +28,15 @@ Sarah introduces herself and starts onboarding in Telegram.
 7. **Races** (runners) and 8. **Health**: saved; injuries alert Coach Andy.
 9. **Finish**: Coach Andy gets a new-runner summary. Scheduled reports and nudges start.
 
+## Plans
+- **free** (default): everything except a programme: logging (watch, Intervals.icu, Hevy, files,
+  typed), feedback after every session, weekly and monthly reports, trends, paces and zones,
+  TRUE PACE, races, chat. Sarah works in monitor mode.
+- **programme** (the upgrade): plus a strength and/or race programme from Coach Andy (written
+  with Dex), the programme form, the race-day pacing plan and the programme on their watch.
+  `python -m app.admin set-tier --runner <id> --tier programme`. Programmes can't be loaded or
+  drafted for a free runner.
+
 ## Focus and options
 | focus | coached as | weekly / monthly report |
 | --- | --- | --- |

@@ -346,6 +346,8 @@ def drafts_dir():
 def propose(conn, rid: int, d: dict, test: bool = False) -> dict:
     """Save the draft as a 'programme' approval for Coach Andy, with the file next to it.
     A test draft says so everywhere, so it's never approved by mistake."""
+    from .. import tiers
+    tiers.require_programmes(conn, rid)
     r = conn.execute("SELECT name, hermes_profile FROM runners WHERE runner_id=?", (rid,)).fetchone()
     text = ("TEST DRAFT, DO NOT APPROVE (it would replace the real programme)\n" if test else "") \
         + summary_text(r["name"], d)
@@ -361,6 +363,9 @@ def apply(conn, approval: dict) -> dict | None:
     current one). None if the approval isn't a Dex draft."""
     if approval.get("kind") != "programme" or not approval.get("payload"):
         return None
+    from .. import tiers
+    if not tiers.has_programmes(conn, approval["runner_id"]):
+        return {"error": "they're on the free plan now; upgrade them first (set-tier --tier programme)"}
     rows = json.loads(approval["payload"])["rows"]
     try:
         out = programme.load_rows(conn, approval["runner_id"], rows, replace=True)["run"]

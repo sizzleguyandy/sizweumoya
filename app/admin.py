@@ -5,7 +5,8 @@
   python -m app.admin set-hermes-key --runner 1 --key <API_SERVER_KEY of that profile>
   python -m app.admin coach-token
   python -m app.admin delete-runner --runner 1
-  python -m app.admin reset-runner --runner 1 --name Andy --tier full
+  python -m app.admin reset-runner --runner 1 --name Andy --tier programme
+  python -m app.admin set-tier --runner 2 --tier programme   # free (default) or programme
   python -m app.admin set-zones --runner 1 --zones 132,144,152,162 [--max-hr 184] [--easy-cap 138]
   python -m app.admin onboard --name Tom --chat-id 123456789 [--focus running|strength|hybrid]
   python -m app.admin set-focus --runner 2 --focus hybrid
@@ -74,6 +75,9 @@ def main() -> None:
     bt.add_argument("--runner", type=int, required=True)
     w = sub.add_parser("welcome", help="Sarah sends the welcome and starts onboarding")
     w.add_argument("--runner", type=int, required=True)
+    st = sub.add_parser("set-tier", help="free (no programme) or programme (strength/race programme from Coach Andy)")
+    st.add_argument("--runner", type=int, required=True)
+    st.add_argument("--tier", required=True, choices=["free", "programme"])
     lp = sub.add_parser("load-programme", help="load a programme from the Excel template (or a CSV)")
     lp.add_argument("--runner", type=int, required=True)
     lp.add_argument("--file", required=True)
@@ -467,7 +471,20 @@ def main() -> None:
             raise SystemExit("unknown runner, or set-hermes-key has not been run yet")
         text = hermes.run_and_deliver(runner, WELCOME_PROMPT, kind="welcome")
         print("Welcome sent:\n" + text)
+    elif args.cmd == "set-tier":
+        conn.execute("UPDATE runners SET tier=? WHERE runner_id=?", (args.tier, args.runner))
+        conn.commit()
+        if args.tier == "free" and conn.execute("SELECT 1 FROM plans WHERE runner_id=? AND active=1",
+                                                (args.runner,)).fetchone():
+            print("Note: their current programme stays until it ends or you replace it.")
+        print(f"Runner {args.runner} is now on the {args.tier} plan.")
+        record.export_runner(conn, args.runner)
     elif args.cmd == "load-programme":
+        from . import tiers
+        try:
+            tiers.require_programmes(conn, args.runner)
+        except tiers.TierError as e:
+            raise SystemExit(str(e))
         print(json.dumps(programme.load(conn, args.runner, args.file, replace=args.replace), indent=2))
         _calendar(conn, args.runner)
         record.export_runner(conn, args.runner)

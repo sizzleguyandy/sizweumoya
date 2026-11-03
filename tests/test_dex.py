@@ -74,8 +74,12 @@ def test_bad_days_are_refused(db):
 
 
 def test_nothing_loads_until_approved_then_programme_replaces_old(db, tmp_path, monkeypatch):
+    from app import tiers
     c, rid = db
     monkeypatch.setattr(dex, "drafts_dir", lambda: tmp_path)
+    with pytest.raises(tiers.TierError, match="free plan"):         # programmes are the upgrade
+        dex.propose(c, rid, dex.draft(c, rid, today=TODAY))
+    c.execute("UPDATE runners SET tier='programme'")
     old = programme.load_rows(c, rid, [{"date": "2026-11-03", "type": "run", "description": "Old easy",
                                         "km": "5", "kind": "easy"}])
     d = dex.draft(c, rid, today=TODAY)
@@ -97,3 +101,13 @@ def test_nothing_loads_until_approved_then_programme_replaces_old(db, tmp_path, 
                              (active[0][0],)).fetchone()[0])
     assert t["week"] == 1 and t["phase"] == "Base"
     assert dex.apply(c, {"kind": "move", "payload": "{}"}) is None
+
+
+def test_approved_draft_refused_if_they_moved_to_free(db, tmp_path, monkeypatch):
+    c, rid = db
+    monkeypatch.setattr(dex, "drafts_dir", lambda: tmp_path)
+    c.execute("UPDATE runners SET tier='programme'")
+    p = dex.propose(c, rid, dex.draft(c, rid, today=TODAY))
+    c.execute("UPDATE runners SET tier='free'")
+    row = queries.decide_approval(c, p["approval_id"], "approved")
+    assert "free plan" in dex.apply(c, row)["error"]

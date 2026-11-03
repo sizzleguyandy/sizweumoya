@@ -48,3 +48,6 @@ a job for the Hermes agent on the PC. A request that "was already rejected/appro
 reported exactly as coach_decide says; never guess what happened to it.
 `coach_dex_forms` shows a runner's latest programme form answers and TR3D code;
 `coach_race_plan` shows a runner's race-day pacing plan.
+
+Dates: you don't know today's date and this chat runs for days. Every tool result carries
+`today_is`; call `get_today` before saying what day it is or working out any date.

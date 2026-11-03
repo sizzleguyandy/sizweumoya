@@ -23,15 +23,13 @@ class HevyError(RuntimeError):
     pass
 
 
-PAID_TIERS = ("full", "paid", "coach")
 
 
 def connect(conn, rid: int, api_key: str) -> str:
     """Save a person's Hevy key. Returns the webhook secret to paste into Hevy (shown once).
-    Hevy sync is a paid feature."""
-    r = conn.execute("SELECT tier FROM runners WHERE runner_id=?", (rid,)).fetchone()
-    if r is None or r["tier"] not in PAID_TIERS:
-        raise HevyError("Hevy sync is part of the paid service; set the person's tier first")
+    Open to every plan (their Hevy account needs Hevy Pro for API access)."""
+    if conn.execute("SELECT 1 FROM runners WHERE runner_id=?", (rid,)).fetchone() is None:
+        raise HevyError("no such person")
     if not api_key or len(api_key) < 16:
         raise HevyError("that doesn't look like a Hevy API key")
     secret = secrets.token_urlsafe(32)

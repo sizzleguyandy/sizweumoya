@@ -6,6 +6,7 @@ token, both checked against ``runners`` in ``app.identity``.
 
 Run:  python -m app.mcp_server   (streamable HTTP on :8100/mcp)
 """
+import functools
 import hmac
 import logging
 import os
@@ -20,7 +21,7 @@ from datetime import datetime as _dt
 from datetime import timedelta
 
 from . import (dex, hermes, ingest, intake, intervals, keyboard, onboarding, paces, plans, queries, racelib,
-               raceplan, record, stats, strength, trends, truepace, upload)
+               raceplan, record, stats, strength, tiers, trends, truepace, upload)
 from .config import settings
 from .db import session
 from .identity import AccessDenied, hash_token, resolve_runner
@@ -31,9 +32,42 @@ mcp = MCPServer(
     name="runner-assistant-coach",
     instructions=(
         "Tools for an assistant running coach. Data always belongs to the runner you are talking to. "
-        "Never create or change a training plan: use propose_plan_change and wait for the head coach."
+        "Never create or change a training plan: use propose_plan_change and wait for the head coach. "
+        "You don't know today's date: every tool result carries today_is (date, weekday, tomorrow); "
+        "use it, or call get_today, whenever a day matters."
     ),
 )
+_register_tool = mcp.tool
+
+
+def _dated_tool(*args, **kwargs):
+    """mcp.tool, plus today's date on every dict a tool returns. The model has no clock of its
+    own and a chat can run for days, so it must never have to guess the day."""
+    register = _register_tool(*args, **kwargs)
+
+    def apply(fn):
+        @functools.wraps(fn)
+        def wrapped(*a, **k):
+            out = fn(*a, **k)
+            if isinstance(out, dict) and "today_is" not in out:
+                out = {**out, "today_is": plans.today_info()}
+            return out
+        return register(wrapped)
+    return apply
+
+
+mcp.tool = _dated_tool
+
+
+@mcp.tool()
+def get_today(ctx: Context) -> dict:
+    """Today's date, weekday and tomorrow, from the server's clock (South African time). Call it
+    before you say what day it is or work out any date ("tomorrow", "this Sunday", "in 3 weeks")."""
+    from datetime import datetime as _now
+    t = _now.now()
+    return {"today_is": plans.today_info(), "time": t.strftime("%H:%M"),
+            "this_week": {"monday": (t.date() - timedelta(days=t.weekday())).isoformat(),
+                          "sunday": (t.date() + timedelta(days=6 - t.weekday())).isoformat()}}
 
 
 def _runner(ctx: Context):
@@ -68,7 +102,8 @@ def get_my_profile(ctx: Context) -> dict:
     Read this first; it decides how you work with this person."""
     with session() as conn:
         rid = _rid(ctx)
-        return queries.profile(conn, rid) | {"coaching": plans.mode(conn, rid), "today_is": plans.today_info()}
+        return queries.profile(conn, rid) | {"coaching": plans.mode(conn, rid), "plan": tiers.info(conn, rid),
+                                             "today_is": plans.today_info()}
 
 
 @mcp.tool()
@@ -267,7 +302,7 @@ def save_runner_summary(ctx: Context, summary: str) -> str:
 
 @mcp.tool()
 def get_current_plan(ctx: Context) -> dict:
-    """Coach-written workouts from 3 days ago to 14 days ahead (paid tiers). Each has a status
+    """Coach-written workouts from 3 days ago to 14 days ahead (programme plan). Each has a status
     (planned/done/missed) and a target: km, kind (easy/long/workout/benchmark/race), HR range
     for quality work, climb for long runs. Easy and long runs are capped at the runner's
     easy_hr_cap (see get_my_profile)."""
@@ -381,7 +416,8 @@ def propose_plan_change(ctx: Context, reason: str, proposal: str, session_date: 
 
 @mcp.tool()
 def alert_coach(ctx: Context, type: str, message: str) -> str:
-    """Flag something to the head coach. type: injury, volume_jump, quiet_runner, other."""
+    """Flag something to the head coach. type: injury, volume_jump, quiet_runner, upgrade (they'd
+    like a programme), other."""
     r = _runner(ctx)
     with _write(r["runner_id"]) as conn:
         aid = queries.create_alert(conn, r["runner_id"], type, message)
@@ -575,6 +611,10 @@ def get_programme_form(ctx: Context) -> dict:
     form). Give both when they ask for a training programme. Coach Andy reviews every answer and
     writes the programme; you never write one."""
     rid = _rid(ctx)
+    with session() as conn:
+        if not tiers.has_programmes(conn, rid):
+            return {"error": f"not on their plan: {tiers.UPGRADE_NOTE}. Offer to tell Coach Andy they'd like "
+                             "to upgrade (alert_coach type upgrade)"}
     url = os.environ.get("DEX_FORM_URL", "").strip()
     if not url:
         return {"error": "the programme form isn't set up yet; tell them Coach Andy will be in touch"}
@@ -813,7 +853,7 @@ def coach_dex_draft(ctx: Context, runner: str, race: str = "", weekly_km: float 
                           extra_days=extra_days or None, profile=profile or None,
                           start=_date.fromisoformat(start) if start else None, plan=plan)
             p = dex.propose(conn, r["runner_id"], d)
-        except (ValueError, dex.DexError) as e:
+        except (ValueError, dex.DexError, tiers.TierError) as e:
             return f"Dex couldn't draft it: {e}"
     try:
         hermes.send_telegram_file(settings.coach_chat_id, p["file"], caption=f"Dex draft for {r['name']} [{p['approval_id']}]")

@@ -86,12 +86,13 @@ def test_api_key_never_in_the_record_file(db, tmp_path):
     assert "hevy_links" not in tables
 
 
-def test_free_tier_cannot_connect(db):
+def test_free_plan_can_connect_hevy(db):
     c, rid = db
     c.execute("UPDATE runners SET tier='free'")
     c.commit()
-    with pytest.raises(hevy.HevyError, match="paid"):
-        hevy.connect(c, rid, "a-real-looking-hevy-api-key-0001")
+    assert hevy.connect(c, rid, "a-real-looking-hevy-api-key-0001")
+    with pytest.raises(hevy.HevyError):
+        hevy.connect(c, 999, "a-real-looking-hevy-api-key-0001")
 
 
 def test_hevy_replaces_the_same_day_typed_or_sheet_session(db):

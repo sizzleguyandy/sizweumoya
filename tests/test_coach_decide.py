@@ -237,7 +237,7 @@ def test_dex_draft_waits_for_approval_then_loads(conn, coach_ctx, delivered, mon
     from app import dex
     rid, _, _ = add_runner(conn, "Tom", "12345", 186, None)
     today = date.today()
-    conn.execute("UPDATE runners SET hr_zones='[132,144,152,162]', easy_hr_cap=144")
+    conn.execute("UPDATE runners SET hr_zones='[132,144,152,162]', easy_hr_cap=144, tier='programme'")
     for i in range(12):
         conn.execute("INSERT INTO runs (runner_id, activity_key, date, distance_km, duration_s, run_type)"
                      " VALUES (?,?,?,?,?,?)", (rid, f"fit:{i}", (today - timedelta(days=2 + 3 * i)).isoformat(),
@@ -356,3 +356,12 @@ def test_session_done_on_another_day_moves_on_the_calendar(conn):
                  (pid, rid, tue, "Easy run", _j.dumps({"kind": "easy", "km": 5}), "done", "fit:x"))
     ev = intervals.done_on_other_days(conn, rid)
     assert len(ev) == 1 and ev[0]["start_date_local"] == f"{wed}T00:00:00" and ev[0]["external_id"].startswith("sizwe-")
+
+
+def test_every_dict_tool_result_carries_today(conn, coach_ctx, delivered):
+    from datetime import date as _d
+    add_runner(conn, "Andy", "12345", 186, None)
+    out = mcp_server.coach_runner_plan(coach_ctx, "andy")
+    assert out["today_is"]["date"] == _d.today().isoformat() and out["today_is"]["weekday"] == _d.today().strftime("%A")
+    t = mcp_server.get_today(coach_ctx)
+    assert t["this_week"]["monday"] <= t["today_is"]["date"] <= t["this_week"]["sunday"]
