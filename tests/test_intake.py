@@ -142,3 +142,25 @@ def test_form_is_in_the_runners_own_record(db, tmp_path):
     row = own.execute("SELECT submitted_at, answers FROM dex_intake").fetchone()
     assert row[0] == "2026-10-27T10:00:00" and "Achilles" in row[1]
     assert own.execute("SELECT preset_id FROM races").fetchone()[0] == "cape_town_marathon"
+
+
+def test_strength_only_form_and_date_order(db):
+    c, rid, code = db
+    row = _row(code, goal="A strength programme", recent="", weekly_km="", longest_km="", run_days="", long_day="",
+               quality_day="", build="", race_pacing="")
+    row.update({"Strength: which days can you train?": "Monday, Wednesday, Friday",
+                "Strength: how many sessions a week?": "3", "Strength: where do you train?": "Gym",
+                "Strength: what equipment do you have at home?": "Dumbbells, Resistance bands",
+                "Strength: your lifting experience": "1-3 years", "Strength: your main goal": "Support my running",
+                "Strength: how long can a session be?": "45 min"})
+    assert intake.import_rows(c, [row])[0]["status"] == "imported"
+    f = intake.latest(c, rid)
+    assert f["goal"] == "strength" and f["strength"]["sessions_per_week"] == 3
+    assert f["strength"]["equipment"] == ["Dumbbells", "Resistance bands"] and "weekly_km" not in f
+    with pytest.raises(dex.DexError, match="strength programme only"):
+        dex.draft(c, rid)
+    missing = dict(row, **{"Strength: where do you train?": ""}, Timestamp="2026/11/04 08:00:00")
+    assert "Strength: where do you train?" in intake.import_rows(c, [missing])[0]["error"]
+    # A month-first sheet (US locale) is recognised from any date with a day over 12.
+    assert intake.date_order([{"x": "11/23/2026"}]) is False and intake.date_order([{"x": "23/11/2026"}]) is True
+    assert intake.date_order([{"x": "03/11/2026"}]) is True                 # ambiguous: day first

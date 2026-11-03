@@ -16,7 +16,18 @@ from . import queries, racelib
 
 DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 OTHER_RACE = "Another race (not in this list)"
-GOALS = {"A race": "race", "Couch to 5K (I'm new to running)": "c25k"}
+GOALS = {"A race": "race", "Couch to 5K (I'm new to running)": "c25k", "A strength programme": "strength",
+         "Both: a race and a strength programme": "both"}
+RUN_GOALS = ("race", "c25k", "both")
+STRENGTH_GOALS = ("strength", "both")
+STRENGTH_SESSIONS = {"2": 2, "3": 3, "4": 4}
+STRENGTH_PLACES = {"Gym": "gym", "Home": "home", "Both": "both"}
+EQUIPMENT = ["Dumbbells", "Kettlebells", "Barbell and plates", "Resistance bands", "Pull-up bar", "Bench",
+             "None (bodyweight only)"]
+EXPERIENCE = {"New to lifting": "new", "Under 1 year": "<1y", "1-3 years": "1-3y", "3+ years": "3y+"}
+STRENGTH_GOAL = {"Get stronger": "strength", "Build muscle": "muscle", "Support my running": "running",
+                 "General fitness": "fitness"}
+SESSION_LENGTH = {"30 min": 30, "45 min": 45, "60 min": 60, "75 min or more": 75}
 BUILDS = {"Steady (safer; best if you're newer or injury-prone)": "conservative",
           "Faster (experienced, consistent runners)": "aggressive"}
 RECENT = {"5 km": 5.0, "10 km": 10.0, "Half marathon (21.1 km)": 21.0975, "Marathon (42.2 km)": 42.195,
@@ -27,7 +38,8 @@ def race_options() -> list[str]:
     return [r["name"] for r in racelib.all_races()] + [OTHER_RACE]
 
 
-# (key, question title, form type, options or None, required)
+# (key, question title, form type, options or None, required): True = always, "run" = when the
+# programme includes running (race, Couch to 5K, both), "strength" = when it includes strength.
 QUESTIONS = [
     ("code", "Your TR3D code", "Short answer", None, True),
     ("name", "Your name", "Short answer", None, True),
@@ -37,16 +49,23 @@ QUESTIONS = [
     ("race_name", "If another race: its name", "Short answer", None, False),
     ("race_km", "If another race: distance in km", "Short answer (number)", None, False),
     ("race_climb", "If another race: total climb in metres (if you know it)", "Short answer (number)", None, False),
-    ("recent", "Your most recent race or time trial", "Multiple choice", list(RECENT), True),
+    ("recent", "Your most recent race or time trial", "Multiple choice", list(RECENT), "run"),
     ("recent_time", "Its finish time (h:mm:ss or mm:ss)", "Short answer", None, False),
     ("recent_date", "Date of that race or time trial", "Date", None, False),
-    ("weekly_km", "How many km do you run in a normal week right now?", "Short answer (number)", None, True),
-    ("longest_km", "Your longest run in the last month, in km", "Short answer (number)", None, True),
-    ("run_days", "Which days can you run?", "Checkboxes", DAYS, True),
-    ("long_day", "Best day for your long run", "Dropdown", DAYS, True),
-    ("quality_day", "Best day for a harder session", "Dropdown", DAYS, True),
-    ("build", "How fast should your training build?", "Multiple choice", list(BUILDS), True),
-    ("race_pacing", "Would you like a personal race-day pacing plan?", "Multiple choice", ["Yes", "No"], True),
+    ("weekly_km", "How many km do you run in a normal week right now?", "Short answer (number)", None, "run"),
+    ("longest_km", "Your longest run in the last month, in km", "Short answer (number)", None, "run"),
+    ("run_days", "Which days can you run?", "Checkboxes", DAYS, "run"),
+    ("long_day", "Best day for your long run", "Dropdown", DAYS, "run"),
+    ("quality_day", "Best day for a harder session", "Dropdown", DAYS, "run"),
+    ("build", "How fast should your training build?", "Multiple choice", list(BUILDS), "run"),
+    ("race_pacing", "Would you like a personal race-day pacing plan?", "Multiple choice", ["Yes", "No"], "run"),
+    ("s_days", "Strength: which days can you train?", "Checkboxes", DAYS, "strength"),
+    ("s_sessions", "Strength: how many sessions a week?", "Multiple choice", list(STRENGTH_SESSIONS), "strength"),
+    ("s_place", "Strength: where do you train?", "Multiple choice", list(STRENGTH_PLACES), "strength"),
+    ("s_equipment", "Strength: what equipment do you have at home?", "Checkboxes", EQUIPMENT, False),
+    ("s_experience", "Strength: your lifting experience", "Multiple choice", list(EXPERIENCE), "strength"),
+    ("s_goal", "Strength: your main goal", "Multiple choice", list(STRENGTH_GOAL), "strength"),
+    ("s_length", "Strength: how long can a session be?", "Multiple choice", list(SESSION_LENGTH), "strength"),
     ("location", "Where do you usually run? (town or city)", "Short answer", None, False),
     ("injuries", "Any injuries, niggles or health conditions Coach Andy should know about?", "Paragraph", None, False),
     ("notes", "Anything else Coach Andy should know?", "Paragraph", None, False),
@@ -85,11 +104,30 @@ def _num(v: str, what: str, lo: float, hi: float) -> float | None:
     return float(m.group())
 
 
+DAY_FIRST = True   # dd/mm/yyyy (South Africa, UK); import_rows works out the sheet's order
+
+
+def date_order(rows: list[dict]) -> bool:
+    """True if the sheet writes dates day first. Any date with a first part over 12 settles it;
+    otherwise day first (set the Sheet's locale to South Africa or United Kingdom)."""
+    for row in rows:
+        for v in row.values():
+            m = re.match(r"^\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})", str(v or ""))
+            if m:
+                a, b = int(m.group(1)), int(m.group(2))
+                if a > 12:
+                    return True
+                if b > 12:
+                    return False
+    return True
+
+
 def _date(v: str, what: str) -> str | None:
     v = (v or "").strip()
     if not v:
         return None
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+    order = ("%d/%m/%Y", "%m/%d/%Y") if DAY_FIRST else ("%m/%d/%Y", "%d/%m/%Y")
+    for fmt in ("%Y-%m-%d", *order, "%d-%m-%Y", "%Y/%m/%d"):
         try:
             return datetime.strptime(v, fmt).date().isoformat()
         except ValueError:
@@ -126,8 +164,9 @@ def _day(v: str) -> str:
 def _stamp(ts: str) -> str:
     """Google Forms' Timestamp column (in the sheet's locale) -> ISO date and time."""
     ts = (ts or "").strip()
-    for fmt in ("%Y/%m/%d %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%m/%d/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S",
-                "%Y/%m/%d %I:%M:%S %p", "%d/%m/%Y %I:%M:%S %p", "%m/%d/%Y %I:%M:%S %p"):
+    dm, md = ("%d/%m/%Y", "%m/%d/%Y") if DAY_FIRST else ("%m/%d/%Y", "%d/%m/%Y")
+    for fmt in ("%Y/%m/%d %H:%M:%S", f"{dm} %H:%M:%S", f"{md} %H:%M:%S", "%Y-%m-%d %H:%M:%S",
+                "%Y/%m/%d %I:%M:%S %p", f"{dm} %I:%M:%S %p", f"{md} %I:%M:%S %p"):
         try:
             return datetime.strptime(ts, fmt).isoformat(timespec="seconds")
         except ValueError:
@@ -139,20 +178,34 @@ def parse(raw: dict) -> dict:
     """One CSV row (question title -> answer) -> checked answers. Raises IntakeError."""
     a = {TITLES[k.strip().lower()]: (v or "").strip() for k, v in raw.items() if k and k.strip().lower() in TITLES}
     ts = next((v for k, v in raw.items() if k and k.strip().lower() == "timestamp"), "")
-    missing = [t for k, t, _, _, req in QUESTIONS if req and not a.get(k)]
+    goal = _pick(a.get("goal"), GOALS, "goal") if a.get("goal") else None
+    need = {True} | ({"run"} if goal in RUN_GOALS else set()) | ({"strength"} if goal in STRENGTH_GOALS else set())
+    missing = [t for k, t, _, _, req in QUESTIONS if req in need and not a.get(k)]
     if missing:
         raise IntakeError("missing answers: " + "; ".join(missing))
     out = {"code": a["code"].upper().replace(" ", ""), "name": a["name"], "submitted_at": _stamp(ts),
-           "goal": _pick(a["goal"], GOALS, "goal"), "build": _pick(a["build"], BUILDS, "build"),
-           "race_pacing": a["race_pacing"].lower().startswith("y"),
-           "weekly_km": _num(a["weekly_km"], "weekly km", 0, 250), "longest_km": _num(a["longest_km"], "longest run", 0, 120),
-           "location": a.get("location") or None, "injuries": a.get("injuries") or None, "notes": a.get("notes") or None}
+           "goal": goal, "location": a.get("location") or None, "injuries": a.get("injuries") or None,
+           "notes": a.get("notes") or None}
+    if goal in STRENGTH_GOALS:
+        out["strength"] = {
+            "days": [_day(d) for d in re.split(r"[,;]\s*", a["s_days"]) if d.strip()],
+            "sessions_per_week": _pick(a["s_sessions"], STRENGTH_SESSIONS, "strength sessions"),
+            "where": _pick(a["s_place"], STRENGTH_PLACES, "where they train"),
+            "equipment": [e.strip() for e in re.split(r",\s*(?=[A-Z])", a.get("s_equipment") or "") if e.strip()],
+            "experience": _pick(a["s_experience"], EXPERIENCE, "lifting experience"),
+            "goal": _pick(a["s_goal"], STRENGTH_GOAL, "strength goal"),
+            "session_min": _pick(a["s_length"], SESSION_LENGTH, "session length")}
+    if goal not in RUN_GOALS:
+        return out
+    out.update({"build": _pick(a["build"], BUILDS, "build"), "race_pacing": a["race_pacing"].lower().startswith("y"),
+                "weekly_km": _num(a["weekly_km"], "weekly km", 0, 250),
+                "longest_km": _num(a["longest_km"], "longest run", 0, 120)})
     days = [_day(d) for d in re.split(r"[,;]\s*", a["run_days"]) if d.strip()]
     out["long_day"], out["quality_day"] = _day(a["long_day"]), _day(a["quality_day"])
     if out["long_day"] == out["quality_day"]:
         raise IntakeError("the long run and the harder session must be on different days")
     out["extra_days"] = [d for d in days if d not in (out["long_day"], out["quality_day"])]
-    if out["goal"] == "race":
+    if out["goal"] in ("race", "both"):
         choice = a.get("race") or ""
         out["race_date"] = _date(a.get("race_date"), "race date")
         if choice and choice != OTHER_RACE:
@@ -224,6 +277,8 @@ def store(conn, row: dict) -> dict:
 
 
 def import_rows(conn, rows: list[dict]) -> list[dict]:
+    global DAY_FIRST
+    DAY_FIRST = date_order(rows)
     out = []
     for i, row in enumerate(rows, start=2):
         try:
@@ -243,7 +298,9 @@ def form_markdown() -> str:
     """The form, question by question, for Coach Andy to build in Google Forms."""
     lines = []
     for n, (key, title, kind, opts, req) in enumerate(QUESTIONS, start=1):
-        lines.append(f"{n}. **{title}** ({kind}{', required' if req else ''})")
+        when = {True: ", required", "run": ", required for running programmes",
+                "strength": ", required for strength programmes"}.get(req, "")
+        lines.append(f"{n}. **{title}** ({kind}{when})")
         if opts == "race library":
             opts = race_options()
         for o in opts or []:

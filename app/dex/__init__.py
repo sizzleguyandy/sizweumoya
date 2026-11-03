@@ -141,6 +141,9 @@ def draft(conn, rid: int, *, race_name: str = "", weekly_km: float | None = None
     from .. import intake
     today = today or date.today()
     form = intake.latest(conn, rid)
+    if not plan and (form or {}).get("goal") == "strength":
+        raise DexError("their programme form asks for a strength programme only. Dex writes running programmes; "
+                       "write the strength one with the programme template (their answers: coach_dex_forms)")
     if (plan or (form or {}).get("goal") or "race") == "c25k":
         return draft_c25k(conn, rid, days=extra_days, start=start, today=today, form=form)
     long_day = long_day or (form or {}).get("long_day") or "Sun"
@@ -226,6 +229,11 @@ def draft(conn, rid: int, *, race_name: str = "", weekly_km: float | None = None
         warnings.append(f"programme form, injuries/health: {form['injuries']}")
     if form and form.get("notes"):
         warnings.append(f"programme form, notes: {form['notes']}")
+    if form and form.get("strength"):
+        st = form["strength"]
+        warnings.append(f"they also want a strength programme ({st['sessions_per_week']} a week on "
+                        f"{', '.join(st['days'])}, {st['where']}); write it with the template, on days that "
+                        "don't clash with the quality session and long run")
     return {"inputs": inp, "summary": summary, "rows": rows, "warnings": warnings}
 
 
