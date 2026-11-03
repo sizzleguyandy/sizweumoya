@@ -59,13 +59,13 @@ QUESTIONS = [
     ("quality_day", "Best day for a harder session", "Dropdown", DAYS, "run"),
     ("build", "How fast should your training build?", "Multiple choice", list(BUILDS), "run"),
     ("race_pacing", "Would you like a personal race-day pacing plan?", "Multiple choice", ["Yes", "No"], "run"),
-    ("s_days", "Strength: which days can you train?", "Checkboxes", DAYS, "strength"),
-    ("s_sessions", "Strength: how many sessions a week?", "Multiple choice", list(STRENGTH_SESSIONS), "strength"),
-    ("s_place", "Strength: where do you train?", "Multiple choice", list(STRENGTH_PLACES), "strength"),
+    ("s_days", "Strength: which days can you train?", "Checkboxes", DAYS, False),
+    ("s_sessions", "Strength: how many sessions a week?", "Multiple choice", list(STRENGTH_SESSIONS), False),
+    ("s_place", "Strength: where do you train?", "Multiple choice", list(STRENGTH_PLACES), False),
     ("s_equipment", "Strength: what equipment do you have at home?", "Checkboxes", EQUIPMENT, False),
-    ("s_experience", "Strength: your lifting experience", "Multiple choice", list(EXPERIENCE), "strength"),
-    ("s_goal", "Strength: your main goal", "Multiple choice", list(STRENGTH_GOAL), "strength"),
-    ("s_length", "Strength: how long can a session be?", "Multiple choice", list(SESSION_LENGTH), "strength"),
+    ("s_experience", "Strength: your lifting experience", "Multiple choice", list(EXPERIENCE), False),
+    ("s_goal", "Strength: your main goal", "Multiple choice", list(STRENGTH_GOAL), False),
+    ("s_length", "Strength: how long can a session be?", "Multiple choice", list(SESSION_LENGTH), False),
     ("location", "Where do you usually run? (town or city)", "Short answer", None, False),
     ("injuries", "Any injuries, niggles or health conditions Coach Andy should know about?", "Paragraph", None, False),
     ("notes", "Anything else Coach Andy should know?", "Paragraph", None, False),
@@ -187,14 +187,16 @@ def parse(raw: dict) -> dict:
            "goal": goal, "location": a.get("location") or None, "injuries": a.get("injuries") or None,
            "notes": a.get("notes") or None}
     if goal in STRENGTH_GOALS:
+        # Reference for Coach Andy, who designs every strength programme himself: all optional.
+        opt = lambda key, options, what: _pick(a[key], options, what) if a.get(key) else None
         out["strength"] = {
-            "days": [_day(d) for d in re.split(r"[,;]\s*", a["s_days"]) if d.strip()],
-            "sessions_per_week": _pick(a["s_sessions"], STRENGTH_SESSIONS, "strength sessions"),
-            "where": _pick(a["s_place"], STRENGTH_PLACES, "where they train"),
+            "days": [_day(d) for d in re.split(r"[,;]\s*", a.get("s_days") or "") if d.strip()],
+            "sessions_per_week": opt("s_sessions", STRENGTH_SESSIONS, "strength sessions"),
+            "where": opt("s_place", STRENGTH_PLACES, "where they train"),
             "equipment": [e.strip() for e in re.split(r",\s*(?=[A-Z])", a.get("s_equipment") or "") if e.strip()],
-            "experience": _pick(a["s_experience"], EXPERIENCE, "lifting experience"),
-            "goal": _pick(a["s_goal"], STRENGTH_GOAL, "strength goal"),
-            "session_min": _pick(a["s_length"], SESSION_LENGTH, "session length")}
+            "experience": opt("s_experience", EXPERIENCE, "lifting experience"),
+            "goal": opt("s_goal", STRENGTH_GOAL, "strength goal"),
+            "session_min": opt("s_length", SESSION_LENGTH, "session length")}
     if goal not in RUN_GOALS:
         return out
     out.update({"build": _pick(a["build"], BUILDS, "build"), "race_pacing": a["race_pacing"].lower().startswith("y"),

@@ -85,7 +85,7 @@ A runner's code: `python -m app.admin intake-code --runner <id>`.
 18. **Would you like a personal race-day pacing plan?** (Multiple choice, required for running programmes)
    - Yes
    - No
-19. **Strength: which days can you train?** (Checkboxes, required for strength programmes)
+19. **Strength: which days can you train?** (Checkboxes)
    - Monday
    - Tuesday
    - Wednesday
@@ -93,11 +93,11 @@ A runner's code: `python -m app.admin intake-code --runner <id>`.
    - Friday
    - Saturday
    - Sunday
-20. **Strength: how many sessions a week?** (Multiple choice, required for strength programmes)
+20. **Strength: how many sessions a week?** (Multiple choice)
    - 2
    - 3
    - 4
-21. **Strength: where do you train?** (Multiple choice, required for strength programmes)
+21. **Strength: where do you train?** (Multiple choice)
    - Gym
    - Home
    - Both
@@ -109,17 +109,17 @@ A runner's code: `python -m app.admin intake-code --runner <id>`.
    - Pull-up bar
    - Bench
    - None (bodyweight only)
-23. **Strength: your lifting experience** (Multiple choice, required for strength programmes)
+23. **Strength: your lifting experience** (Multiple choice)
    - New to lifting
    - Under 1 year
    - 1-3 years
    - 3+ years
-24. **Strength: your main goal** (Multiple choice, required for strength programmes)
+24. **Strength: your main goal** (Multiple choice)
    - Get stronger
    - Build muscle
    - Support my running
    - General fitness
-25. **Strength: how long can a session be?** (Multiple choice, required for strength programmes)
+25. **Strength: how long can a session be?** (Multiple choice)
    - 30 min
    - 45 min
    - 60 min
@@ -130,9 +130,9 @@ A runner's code: `python -m app.admin intake-code --runner <id>`.
 
 ## What each answer does
 - **Race / Couch to 5K / strength / both**: a Dex race plan (at least 6 weeks out), the 12-week
-  Couch to 5K, or a strength programme (Coach Andy writes it with the template from the strength
-  answers; Dex shows them on a "both" draft). Running questions are required only for running
-  programmes, strength questions only for strength ones.
+  Couch to 5K, or a strength programme, which Coach Andy designs himself (the strength answers are optional
+  reference for him; Dex shows them on a "both" draft and never writes strength sessions).
+  Running questions are required only for running programmes.
 - **Which race / race date**: a library race brings its distance, climb, hills, start location,
   course guide and personal splits; the form's date wins over the library's usual date.
   Another race needs its name, distance and date (climb if known).

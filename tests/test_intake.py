@@ -159,8 +159,9 @@ def test_strength_only_form_and_date_order(db):
     assert f["strength"]["equipment"] == ["Dumbbells", "Resistance bands"] and "weekly_km" not in f
     with pytest.raises(dex.DexError, match="strength programme only"):
         dex.draft(c, rid)
-    missing = dict(row, **{"Strength: where do you train?": ""}, Timestamp="2026/11/04 08:00:00")
-    assert "Strength: where do you train?" in intake.import_rows(c, [missing])[0]["error"]
+    blank = dict(row, **{"Strength: where do you train?": ""}, Timestamp="2026/11/04 08:00:00")
+    assert intake.import_rows(c, [blank])[0]["status"] == "imported"          # strength answers are optional
+    assert intake.latest(c, rid)["strength"]["where"] is None
     # A month-first sheet (US locale) is recognised from any date with a day over 12.
     assert intake.date_order([{"x": "11/23/2026"}]) is False and intake.date_order([{"x": "23/11/2026"}]) is True
     assert intake.date_order([{"x": "03/11/2026"}]) is True                 # ambiguous: day first

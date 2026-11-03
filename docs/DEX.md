@@ -1,6 +1,7 @@
 # Dex, the run brain
 
-Dex writes running programmes. Sarah never does: she asks Dex and passes the result on.
+Dex writes running programmes only. Strength programmes are designed by Coach Andy himself
+(programme template). Sarah never writes either: she passes on what Dex or Coach Andy produced.
 Dex is code, not a model: the TR3D Run Coach engine (copied into `app/dex/engine/` from
 `sizzleguyandy/run_coach`, `coach_core/engine`) builds the plan: Daniels VO2X paces, phases,
 volume curve, quality sessions, hills and taper. Dex adds Coach Andy's heart-rate targets and
