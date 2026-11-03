@@ -270,6 +270,30 @@ def done_on_other_days(conn, rid: int, back_days: int = 21) -> list[dict]:
     return out
 
 
+# ---- heart-rate zones: the same on the watch as in the record ----------------------------
+
+ZONE_NAMES = ["Recovery", "Easy", "Aerobic", "Threshold", "Anaerobic"]
+
+
+def push_zones(conn, rid: int) -> dict:
+    """Write the runner's approved zones (tops of Z1-Z4, max HR as the top of Z5) into their
+    Intervals.icu run settings, so "Z2 HR" on a watch workout means the same bpm as here."""
+    import json
+    r = conn.execute("SELECT hr_zones, max_hr FROM runners WHERE runner_id=?", (rid,)).fetchone()
+    if not r or not r["hr_zones"] or not r["max_hr"]:
+        raise IntervalsError("no approved zones and max HR on file to send")
+    tops = [int(z) for z in json.loads(r["hr_zones"])] + [int(r["max_hr"])]
+    link = link_for(conn, rid)
+    with _client(link) as c:
+        athlete = _check(c.get(f"/athlete/{link['athlete_id']}")).json()
+        run = next((x for x in athlete.get("sportSettings") or [] if "Run" in (x.get("types") or [])), None)
+        if run is None or run.get("id") is None:
+            raise IntervalsError("their Intervals.icu account has no run settings to update")
+        _check(c.put(f"/athlete/{link['athlete_id']}/sport-settings/{run['id']}",
+                     json={"hr_zones": tops, "hr_zone_names": ZONE_NAMES, "max_hr": tops[-1]}))
+    return {"zones": tops, "sport_settings_id": run["id"]}
+
+
 # ---- runs sent as files: onto the calendar too ------------------------------------------
 
 def upload_activity(conn, rid: int, name: str, data: bytes, activity_key: str) -> dict:

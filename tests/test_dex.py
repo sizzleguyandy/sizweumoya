@@ -111,3 +111,19 @@ def test_approved_draft_refused_if_they_moved_to_free(db, tmp_path, monkeypatch)
     c.execute("UPDATE runners SET tier='free'")
     row = queries.decide_approval(c, p["approval_id"], "approved")
     assert "free plan" in dex.apply(c, row)["error"]
+
+
+def test_quality_sessions_get_watch_steps(db):
+    from app import intervals
+    c, rid = db
+    rows = dex.draft(c, rid, extra_days="Thu,Sat", profile="aggressive", today=TODAY)["rows"]
+    q = [r for r in rows if r["kind"] == "workout"]
+    assert q and sum(1 for r in q if r["steps"]) >= len(q) * 0.8        # nearly all quality sessions structured
+    thr = next(r for r in q if r["description"].startswith("Threshold") and r["steps"])
+    text = programme.steps_text(thr["steps"])
+    assert text.startswith("- Warm up 2km Z2 HR") and "Z4 HR" in text
+    loaded = programme.load_rows(c, rid, rows, replace=True)
+    w = c.execute("SELECT w.*, p.type ptype FROM planned_workouts w JOIN plans p ON p.id=w.plan_id"
+                  " WHERE w.date=?", (thr["date"],)).fetchone()
+    ev = intervals.to_event(w, c.execute("SELECT * FROM runners").fetchone())
+    assert ev["category"] == "WORKOUT" and "Z4 HR" in ev["description"]

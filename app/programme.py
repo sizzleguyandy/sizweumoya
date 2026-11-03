@@ -46,6 +46,14 @@ def _sheet_rows(ws) -> list[dict]:
     return out
 
 
+def steps_text(cell: str) -> str:
+    """A steps cell ("|" between lines, "||" for the blank line that closes a repeat block)
+    -> Intervals.icu workout text."""
+    import re
+    text = "\n".join(x.strip() for x in (cell or "").split("|")).strip()
+    return re.sub(r"\n{3,}", "\n\n", text)
+
+
 def read_rows(path: str) -> tuple[list[dict], list[dict]]:
     """(sessions, races) from the Excel template or a CSV of sessions."""
     if path.lower().endswith((".xlsx", ".xlsm")):
@@ -114,7 +122,7 @@ def load_rows(conn, rid: int, rows_: list[dict], replace: bool = False) -> dict:
             target["hr_max"] = int(r["hr_high"])
         if r.get("steps"):
             # Structured workout for the watch, in Intervals.icu's workout text; "|" starts a new line.
-            target["steps"] = "\n".join(x.strip() for x in r["steps"].split("|") if x.strip())
+            target["steps"] = steps_text(r["steps"])
         if r.get("week"):
             target["week"] = int(float(r["week"]))
         if r.get("phase"):

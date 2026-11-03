@@ -56,6 +56,20 @@ Then schedule `POST /jobs/intervals-sync` hourly at an odd minute (e.g. :17).
 Automatic debriefs for pulled activities stay off (`INTERVALS_AI_ALLOWED=0`) until the
 Intervals.icu API terms have been checked.
 
+## Garmin (and Zepp) watches
+- Runs: the watch's app syncs them to Intervals.icu; the hourly pull brings them in.
+- Workouts: with "Upload planned workouts" ticked in Intervals.icu's Garmin connection, every
+  session with steps goes to Garmin Connect and the watch guides it step by step. Easy and
+  long runs are one step ("5km Z2 HR"); Dex's quality sessions are written as full steps
+  (warm-up, repeats with recoveries, cool-down) from the session text (`app/workouts.py`).
+  Long runs with faster parts and mixed ladders stay calendar notes.
+- Zones: approved zones are written to the runner's Intervals.icu run settings (five zones,
+  tops of Z1-Z4 plus max HR), so "Z2 HR" on the watch is the same bpm as Sarah's cap.
+  `python -m app.admin intervals-zones --runner <id>` sends them again.
+- Fallback: `send_my_workout_file` (Sarah) or `python -m app.admin workout-fit --runner <id>
+  --date <day>` makes a Garmin FIT workout file (File Id type 5, Workout, Workout Steps; HR as
+  bpm + 100) to copy to GARMIN/NewFiles over USB.
+
 ## Everything they run is on the calendar
 Runs recorded on the watch reach Intervals.icu through the watch's own app (Zepp, Garmin
 Connect...), plan or no plan. Runs sent to Sarah as a file are uploaded to their Intervals.icu

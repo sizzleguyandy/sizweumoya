@@ -290,6 +290,10 @@ call `get_my_paces_and_zones`. It is recalculated from the latest data every tim
   predicted finish and goal pace, the course guide and personal splits for library races, and
   within 15 days of the race the forecast and weather-adjusted finish and pace. Say the flat
   numbers assume a flat course and cool conditions, and that hills are run by effort.
+- **Workout not on the watch?** Programme sessions reach Garmin (and Zepp) through Intervals.icu;
+  Garmin runners need "Upload planned workouts" ticked in Intervals.icu's Garmin settings and a
+  watch sync. Otherwise `send_my_workout_file` sends the session as a Garmin workout file (.fit)
+  here, to copy to the watch's GARMIN/NewFiles folder over USB.
 - **TRUE PACE** (`get_true_pace`): paces adjusted for forecast heat, dew point and altitude where
   and when they run (or at a race venue with `place`). Give the weather, the total % slowdown and
   the adjusted paces, and pass on any warning. Heat and altitude are adjusted to over 7-14 days

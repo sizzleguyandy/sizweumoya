@@ -159,6 +159,12 @@ def main() -> None:
     mv.add_argument("--runner", type=int, required=True)
     mv.add_argument("--from", dest="from_date", required=True)
     mv.add_argument("--to", dest="to_date", required=True)
+    wf = sub.add_parser("workout-fit", help="a programme session as a Garmin workout file (.fit)")
+    wf.add_argument("--runner", type=int, required=True)
+    wf.add_argument("--date", required=True)
+    wf.add_argument("--out", help="where to save it (default: the session's file name here)")
+    iz = sub.add_parser("intervals-zones", help="send a runner's approved HR zones to their Intervals.icu settings")
+    iz.add_argument("--runner", type=int, required=True)
     es = sub.add_parser("edit-session", help="Coach Andy: change one programme session (only what's given)")
     es.add_argument("--runner", type=int, required=True)
     es.add_argument("--date", required=True)
@@ -253,6 +259,11 @@ def main() -> None:
                 if n:
                     _calendar(conn, args.runner)
         conn.commit()
+        if conn.execute("SELECT 1 FROM intervals_links WHERE runner_id=? AND status='active'", (args.runner,)).fetchone():
+            try:
+                print("Intervals.icu zones:", intervals.push_zones(conn, args.runner))
+            except intervals.IntervalsError as e:
+                print("Intervals.icu zones not updated:", e)
         print(dict(conn.execute("SELECT name, hr_zones, max_hr, easy_hr_cap, zones_locked FROM runners"
                                 " WHERE runner_id=?", (args.runner,)).fetchone()))
         print("Applies to runs stored from now on. Runs already stored keep their zone times.")
@@ -345,7 +356,7 @@ def main() -> None:
         if len(rows_) != 1:
             raise SystemExit(f"expected one planned session on {args.date}, found {len(rows_)}")
         t = json.loads(rows_[0]["target"] or "{}")
-        t["steps"] = "\n".join(x.strip() for x in args.steps.split("|") if x.strip())
+        t["steps"] = programme.steps_text(args.steps)
         conn.execute("UPDATE planned_workouts SET target=? WHERE id=?", (json.dumps(t), rows_[0]["id"]))
         conn.commit()
         print(f"{args.date} {rows_[0]['description'][:50]}\n{t['steps']}")
@@ -411,6 +422,23 @@ def main() -> None:
         print("sessions changed:", plans.replace_hr_cap(conn, args.runner, args.old, args.new))
         _calendar(conn, args.runner)
         record.export_runner(conn, args.runner)
+    elif args.cmd == "workout-fit":
+        from . import workouts
+        runner = conn.execute("SELECT * FROM runners WHERE runner_id=?", (args.runner,)).fetchone()
+        w = conn.execute("SELECT w.* FROM planned_workouts w JOIN plans p ON p.id=w.plan_id WHERE w.runner_id=?"
+                         " AND p.active=1 AND w.date=? AND p.type='run'", (args.runner, args.date)).fetchone()
+        if w is None:
+            raise SystemExit(f"no run session on {args.date}")
+        try:
+            data, name = workouts.file_for_session(w, runner)
+        except ValueError as e:
+            raise SystemExit(str(e))
+        out = args.out or name
+        with open(out, "wb") as f:
+            f.write(data)
+        print(f"{out} ({len(data)} bytes)")
+    elif args.cmd == "intervals-zones":
+        print(intervals.push_zones(conn, args.runner))
     elif args.cmd == "edit-session":
         from . import plans
         try:

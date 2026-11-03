@@ -9,7 +9,7 @@ import json
 import re
 from datetime import date, timedelta
 
-from .. import paces, programme, queries
+from .. import paces, programme, queries, workouts
 from ..config import settings
 from .engine.plan_builder import build_full_plan
 
@@ -192,7 +192,9 @@ def draft(conn, rid: int, *, race_name: str = "", weekly_km: float | None = None
                 if km <= 0:
                     continue                                       # rest, walk or cross-training
             label = race["name"] if kind == "race" else s["session"].replace("🏁 ", "")
+            st = workouts.from_dex(s["notes"]) if kind in ("workout", "easy") else None
             rows.append({"date": day.isoformat(), "type": "run", "kind": kind, "km": f"{km:g}",
+                         "steps": workouts.to_intervals(st).replace("\n", "|") if st else "",
                          "description": f"{label} — {s['notes']}"[:300],
                          "hr_low": str(hr[0]) if hr else "", "hr_high": str(hr[1]) if hr else "",
                          "climb_m": f"{race['ascent_m']:g}" if kind == "race" and race["ascent_m"] else "",

@@ -21,7 +21,7 @@ from datetime import datetime as _dt
 from datetime import timedelta
 
 from . import (dex, hermes, ingest, intake, intervals, keyboard, onboarding, paces, plans, queries, racelib,
-               raceplan, record, stats, strength, tiers, trends, truepace, upload)
+               raceplan, record, stats, strength, tiers, trends, truepace, upload, workouts)
 from .config import settings
 from .db import session
 from .identity import AccessDenied, hash_token, resolve_runner
@@ -353,6 +353,37 @@ def get_true_pace(ctx: Context, when: str = "", place: str = "") -> dict:
         return truepace.true_pace(spot, at, perf, r["easy_hr_cap"])
     except truepace.WeatherError as e:
         return {"error": f"{e}; give their normal paces and go by heart rate and feel"}
+
+
+@mcp.tool()
+def send_my_workout_file(ctx: Context, date: str = "") -> str:
+    """Send a programme run session as a Garmin workout file (.fit) to this chat, for when it
+    hasn't reached the watch through Intervals.icu (copy it to the watch's GARMIN/NewFiles folder
+    over USB, or open it in Garmin Connect). date YYYY-MM-DD, default today's session or the next."""
+    r = _runner(ctx)
+    from datetime import date as _d
+    with session() as conn:
+        day = date.strip() or None
+        q = ("SELECT w.* FROM planned_workouts w JOIN plans p ON p.id=w.plan_id WHERE w.runner_id=? AND p.active=1"
+             " AND p.type='run' AND w.status IN ('planned','missed') AND w.date" + ("=?" if day else ">=?")
+             + " ORDER BY w.date LIMIT 1")
+        w = conn.execute(q, (r["runner_id"], day or _d.today().isoformat())).fetchone()
+        if w is None:
+            return "No open run session " + (f"on {day}." if day else "today or later.")
+        try:
+            data, name = workouts.file_for_session(w, r)
+        except ValueError as e:
+            return f"Not sent: {e}"
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / name
+        path.write_bytes(data)
+        try:
+            hermes.send_telegram_file(r["telegram_chat_id"], str(path),
+                                      caption=f"{w['date']}: {w['description'][:120]}")
+        except Exception as e:
+            return f"Couldn't send the file ({e.__class__.__name__})."
+    return f"Sent the workout file for {w['date']} ({w['description'][:60]})."
 
 
 @mcp.tool()
@@ -720,6 +751,18 @@ def _resync_calendar(conn, rid: int, *days: str) -> None:
         log.exception("calendar update for runner %s failed", rid)
 
 
+def _zones_to_intervals(rid: int) -> None:
+    """Approved zones go to their Intervals.icu settings too (in the background)."""
+    def _work() -> None:
+        try:
+            with session() as conn:
+                if conn.execute("SELECT 1 FROM intervals_links WHERE runner_id=? AND status='active'", (rid,)).fetchone():
+                    intervals.push_zones(conn, rid)
+        except Exception:
+            log.exception("zones for runner %s could not be sent to Intervals.icu", rid)
+    threading.Thread(target=_work, name=f"zones-{rid}", daemon=True).start()
+
+
 def _link_in_background(runner: dict) -> None:
     """Try the new Intervals.icu link straight away (it works if they already accepted the
     coaching request); otherwise the hourly sync keeps trying."""
@@ -794,7 +837,8 @@ def coach_decide(ctx: Context, approval_id: str, decision: str, note: str = "") 
         proposal = row["proposal"]
         applied = loaded = None
         if decision == "approved":
-            onboarding.apply_zones(conn, row)
+            if onboarding.apply_zones(conn, row):
+                _zones_to_intervals(row["runner_id"])
             applied = _apply_move(conn, row)
             loaded = dex.apply(conn, row)
             if loaded and not loaded.get("error"):
