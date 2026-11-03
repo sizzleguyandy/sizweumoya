@@ -192,6 +192,8 @@ CREATE TABLE IF NOT EXISTS deleted_activities (
     runner_id    INTEGER NOT NULL REFERENCES runners(runner_id) ON DELETE CASCADE,
     date         TEXT,
     distance_km  REAL,
+    duration_s   REAL,
+    source_ref   TEXT,                    -- e.g. intervals:i123, once matched to a synced activity
     deleted_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

@@ -322,6 +322,29 @@ def from_strava(activity: dict) -> bool:
             or "STRAVA" in str(activity.get("_note") or "").upper())
 
 
+def deleted_before(conn, rid: int, a: dict) -> bool:
+    """True for an Intervals.icu activity Coach Andy deleted here. Matched by its id once seen,
+    else by day, distance and moving time: Intervals.icu can hand back a file that differs byte
+    for byte from the one deleted, so the file key alone isn't enough."""
+    ref = f"intervals:{a.get('id')}"
+    if conn.execute("SELECT 1 FROM deleted_activities WHERE runner_id=? AND source_ref=?", (rid, ref)).fetchone():
+        return True
+    day = str(a.get("start_date_local") or "")[:10]
+    km = (a.get("distance") or 0) / 1000
+    secs = a.get("moving_time") or 0
+    if not day or not km:
+        return False
+    hit = conn.execute(
+        "SELECT activity_key FROM deleted_activities WHERE runner_id=? AND date=? AND source_ref IS NULL"
+        " AND abs(distance_km-?)<=max(0.05, 0.01*?) AND (duration_s IS NULL OR ?=0 OR abs(duration_s-?)<=max(30, 0.01*?))",
+        (rid, day, km, km, secs, secs, secs)).fetchone()
+    if hit is None:
+        return False
+    conn.execute("UPDATE deleted_activities SET source_ref=? WHERE activity_key=?", (ref, hit["activity_key"]))
+    conn.commit()
+    return True
+
+
 def pull_activities(conn, rid: int, since: date) -> dict:
     """Download new activities' original files and store them through the .fit pipeline."""
     link = link_for(conn, rid)
@@ -335,6 +358,10 @@ def pull_activities(conn, rid: int, since: date) -> dict:
             if from_strava(a):
                 counts["skipped"] += 1   # nothing from Strava is used anywhere in this system
                 log.info("intervals activity %s skipped: came from Strava", a.get("id"))
+                continue
+            if deleted_before(conn, rid, a):
+                counts["skipped"] += 1
+                log.info("intervals activity %s skipped: Coach Andy deleted it", a.get("id"))
                 continue
             try:
                 f = c.get(f"/activity/{a['id']}/fit-file")

@@ -366,7 +366,7 @@ def delete_run(conn, rid: int, run_id: int) -> dict:
     """Delete one stored run (e.g. half of a run stopped by mistake, once the joined file is in).
     A programme session it completed goes back to planned (or missed, if its day has passed),
     and the file is remembered so no sync brings it back."""
-    r = conn.execute("SELECT id, date, distance_km, activity_key FROM runs WHERE id=? AND runner_id=?",
+    r = conn.execute("SELECT id, date, distance_km, duration_s, activity_key FROM runs WHERE id=? AND runner_id=?",
                      (run_id, rid)).fetchone()
     if r is None:
         raise PlanChangeError(f"runner {rid} has no run with id {run_id}")
@@ -375,8 +375,8 @@ def delete_run(conn, rid: int, run_id: int) -> dict:
     for w in freed:
         conn.execute("UPDATE planned_workouts SET completed_activity_key=NULL, status=? WHERE id=?",
                      ("missed" if w["date"] < date.today().isoformat() else "planned", w["id"]))
-    conn.execute("INSERT OR IGNORE INTO deleted_activities (activity_key, runner_id, date, distance_km)"
-                 " VALUES (?,?,?,?)", (r["activity_key"], rid, r["date"], r["distance_km"]))
+    conn.execute("INSERT OR IGNORE INTO deleted_activities (activity_key, runner_id, date, distance_km, duration_s)"
+                 " VALUES (?,?,?,?,?)", (r["activity_key"], rid, r["date"], r["distance_km"], r["duration_s"]))
     conn.execute("DELETE FROM run_splits WHERE run_id=?", (run_id,))
     conn.execute("DELETE FROM runs WHERE id=?", (run_id,))
     conn.commit()

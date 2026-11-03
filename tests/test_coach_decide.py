@@ -365,3 +365,31 @@ def test_every_dict_tool_result_carries_today(conn, coach_ctx, delivered):
     assert out["today_is"]["date"] == _d.today().isoformat() and out["today_is"]["weekday"] == _d.today().strftime("%A")
     t = mcp_server.get_today(coach_ctx)
     assert t["this_week"]["monday"] <= t["today_is"]["date"] <= t["this_week"]["sunday"]
+
+
+def test_approve_said_the_chat_way_works_and_explains_old_requests(conn, coach_ctx, delivered, monkeypatch):
+    rid, profile, token = add_runner(conn, "Andy", "12345", 186, None)
+    _plan(conn, rid)
+    monkeypatch.setattr(hermes, "notify_coach", lambda text: None)
+    ctx = SimpleNamespace(headers={"x-hermes-profile": profile, "Authorization": f"Bearer {token}"})
+    aid = mcp_server.propose_plan_change(ctx, "r", "p", "2026-10-23", "2026-10-24").split("request ")[1].rstrip(").")
+    assert "Programme updated" in mcp_server.coach_decide(coach_ctx, f" {aid} ", "approve")
+    again = mcp_server.coach_decide(coach_ctx, aid, "Approve")
+    assert again.startswith(f"Nothing changed: request {aid}") and "already approved on" in again
+    assert mcp_server.coach_decide(coach_ctx, aid, "maybe").startswith("Say approve, reject or edit")
+
+
+def test_pull_skips_a_deleted_run_even_if_the_file_differs(conn):
+    from datetime import date as _d
+    from app import intervals, plans
+    rid, _, _ = add_runner(conn, "Andy", "12345", 186, None)
+    conn.execute("INSERT INTO runs (runner_id, activity_key, date, distance_km, duration_s) VALUES (?,?,?,?,?)",
+                 (rid, "fit:half", "2026-10-28", 6.45, 2980))
+    rid_run = conn.execute("SELECT id FROM runs").fetchone()[0]
+    plans.delete_run(conn, rid, rid_run)
+    act = {"id": "i555", "start_date_local": "2026-10-28T18:49:29", "distance": 6447.0, "moving_time": 2981}
+    assert intervals.deleted_before(conn, rid, act)                       # matched by day, km and time
+    assert conn.execute("SELECT source_ref FROM deleted_activities").fetchone()[0] == "intervals:i555"
+    assert intervals.deleted_before(conn, rid, {"id": "i555"})            # then by its id
+    assert not intervals.deleted_before(conn, rid, {"id": "i9", "start_date_local": "2026-10-28T06:00:00",
+                                                     "distance": 12200.0, "moving_time": 5962})   # the joined run

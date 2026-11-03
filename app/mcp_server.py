@@ -812,6 +812,11 @@ def _deliver_decision(runner: dict, decision: str, proposal: str, note: str) -> 
                      daemon=True).start()
 
 
+DECISIONS = {"approve": "approved", "approved": "approved", "yes": "approved", "ok": "approved",
+             "reject": "rejected", "rejected": "rejected", "no": "rejected", "decline": "rejected",
+             "edit": "edited", "edited": "edited"}
+
+
 @mcp.tool()
 def coach_decide(ctx: Context, approval_id: str, decision: str, note: str = "") -> str:
     """Coach only: approved, rejected or edited, against an existing request id.
@@ -820,8 +825,11 @@ def coach_decide(ctx: Context, approval_id: str, decision: str, note: str = "") 
     minute or two) is delivered by a background thread.
     """
     _require_coach(ctx)
+    decision = DECISIONS.get((decision or "").strip().lower(), (decision or "").strip().lower())
+    if decision not in ("approved", "rejected", "edited"):
+        return "Say approve, reject or edit (with a note)."
     with session() as conn:
-        row = queries.decide_approval(conn, approval_id, decision, note or None)
+        row = queries.decide_approval(conn, approval_id.strip(), decision, note or None)
         if row is None:
             old = conn.execute("SELECT a.status, a.decided_at, a.coach_note, a.reason, r.name FROM approvals a"
                                " JOIN runners r ON r.runner_id=a.runner_id WHERE a.id=?", (approval_id,)).fetchone()

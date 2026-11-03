@@ -166,7 +166,8 @@ def draft(conn, rid: int, *, race_name: str = "", weekly_km: float | None = None
     first -= timedelta(days=first.weekday())                      # weeks run Monday to Sunday
     weeks = (race_monday - first).days // 7 + 1
     if weeks < MIN_WEEKS:
-        raise DexError(f"only {max(weeks, 0)} weeks until {race['name']} ({race['date']}); Dex needs at least "
+        n = max(weeks, 0)
+        raise DexError(f"only {n} week{'' if n == 1 else 's'} until {race['name']} ({race['date']}); Dex needs at least "
                        f"{MIN_WEEKS}. Write a short block like this one by hand (programme template)")
     if weeks > MAX_WEEKS:
         first = race_monday - timedelta(weeks=MAX_WEEKS - 1)
