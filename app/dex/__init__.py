@@ -219,12 +219,46 @@ def draft(conn, rid: int, *, race_name: str = "", weekly_km: float | None = None
         "easy_hr_cap": runner["easy_hr_cap"], "profile": profile, "hilliness": race_hilliness(race),
         "programme_form": form["submitted_at"] if form else None,
         "race_pacing_plan": bool(form and form.get("race_pacing")),
+        "watch": watch_delivery(conn, rid),
     }
     if form and form.get("injuries"):
         warnings.append(f"programme form, injuries/health: {form['injuries']}")
     if form and form.get("notes"):
         warnings.append(f"programme form, notes: {form['notes']}")
     return {"inputs": inp, "summary": summary, "rows": rows, "warnings": warnings}
+
+
+WATCH_DELIVERY = {
+    "garmin": ("ok", "structured workouts go to the watch through Intervals.icu (they need 'Upload planned "
+                     "workouts' ticked in its Garmin settings); Sarah can also send each one as a .fit file"),
+    "zepp": ("ok", "structured workouts go to the watch through Intervals.icu and Zepp"),
+    "coros": ("check", "runs sync in; check that planned workouts reach a COROS watch from Intervals.icu"),
+    "suunto": ("check", "runs sync in; check that planned workouts reach a Suunto watch from Intervals.icu"),
+    "polar": ("check", "runs sync in; check that planned workouts reach a Polar watch from Intervals.icu"),
+    "wahoo": ("check", "runs sync in; check that planned workouts reach a Wahoo watch from Intervals.icu"),
+    "apple": ("none", "no workout delivery to the watch: sessions show on the Intervals.icu calendar and in "
+                      "Sarah's messages only"),
+}
+
+
+def watch_delivery(conn, rid: int) -> dict:
+    """How this programme will reach the runner's wrist: their watch (from onboarding) and their
+    Intervals.icu link. Shown on every draft so Coach Andy knows before approving."""
+    r = conn.execute("SELECT watch FROM runners WHERE runner_id=?", (rid,)).fetchone()
+    brand = (r["watch"] or "").lower() if r else ""
+    link = conn.execute("SELECT status FROM intervals_links WHERE runner_id=?", (rid,)).fetchone()
+    if not brand:
+        level, text = "check", "no watch on file: ask in onboarding (set_my_watch)"
+    else:
+        level, text = WATCH_DELIVERY.get(brand, ("check", f"{brand}: check whether planned workouts reach it"))
+    if brand != "apple" and (link is None or link["status"] != "active"):
+        why = ("not connected to Intervals.icu, so nothing reaches the watch yet" if link is None else
+               f"Intervals.icu link is {link['status']}, so nothing reaches the watch until it's active")
+        if brand:
+            level, text = ("none" if link is None else "check"), why
+        else:
+            text = f"{text}; {why}"
+    return {"watch": brand or None, "level": level, "delivery": text}
 
 
 def draft_c25k(conn, rid: int, *, days: str | None = None, start: date | None = None,
@@ -266,8 +300,15 @@ def draft_c25k(conn, rid: int, *, days: str | None = None, start: date | None = 
     if form and form.get("notes"):
         warnings.append(f"programme form, notes: {form['notes']}")
     summary = {"plan": "c25k", "start": first.isoformat(), "weeks": TOTAL_WEEKS, "days": run_days,
-               "sessions": len(rows), "programme_form": form["submitted_at"] if form else None}
+               "sessions": len(rows), "programme_form": form["submitted_at"] if form else None,
+               "watch": watch_delivery(conn, rid)}
     return {"inputs": {}, "summary": summary, "rows": rows, "warnings": warnings}
+
+
+def _watch_line(s: dict) -> str:
+    w = s.get("watch") or {}
+    mark = {"ok": "", "check": "CHECK: ", "none": "NOT ON THE WATCH: "}.get(w.get("level"), "")
+    return f"Watch: {mark}{(w.get('watch') or 'unknown').capitalize()}: {w.get('delivery', '')}"
 
 
 def summary_text(name: str, d: dict) -> str:
@@ -276,7 +317,7 @@ def summary_text(name: str, d: dict) -> str:
         lines = [f"Dex programme draft for {name}: Couch to 5K",
                  f"12 weeks from {s['start']}, 3 run/walk sessions a week on {', '.join(s['days'])}",
                  "Ends with a 5 km time trial in week 12, which gives the paces for a full plan",
-                 f"Programme form: {s['programme_form'] or 'none'}"]
+                 f"Programme form: {s['programme_form'] or 'none'}", _watch_line(s)]
         return "\n".join(lines + [f"Note: {w}" for w in d["warnings"]])
     lines = [f"Dex programme draft for {name}: {s['race']} ({s['hilliness']} hills)",
              f"{s['weeks']} weeks from {s['start']} ("
@@ -288,7 +329,7 @@ def summary_text(name: str, d: dict) -> str:
              f"profile {s['profile']}",
              f"Easy pace {s['paces']['easy']}, threshold {s['paces']['threshold']}; easy HR cap {s['easy_hr_cap']}",
              f"Programme form: {s['programme_form'] or 'none'}; race-day pacing plan: "
-             f"{'yes' if s['race_pacing_plan'] else 'no'}"]
+             f"{'yes' if s['race_pacing_plan'] else 'no'}", _watch_line(s)]
     lines += [f"Note: {w}" for w in d["warnings"]]
     return "\n".join(lines)
 

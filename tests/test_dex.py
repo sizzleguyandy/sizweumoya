@@ -127,3 +127,20 @@ def test_quality_sessions_get_watch_steps(db):
                   " WHERE w.date=?", (thr["date"],)).fetchone()
     ev = intervals.to_event(w, c.execute("SELECT * FROM runners").fetchone())
     assert ev["category"] == "WORKOUT" and "Z4 HR" in ev["description"]
+
+
+def test_draft_says_how_the_programme_reaches_the_watch(db):
+    from app import intervals
+    c, rid = db
+    d = dex.draft(c, rid, today=TODAY)
+    assert d["summary"]["watch"]["watch"] is None and "Watch: CHECK: Unknown: no watch on file" in dex.summary_text("Tom", d)
+    c.execute("UPDATE runners SET watch='garmin'")
+    w = dex.draft(c, rid, today=TODAY)["summary"]["watch"]
+    assert w["level"] == "none" and "not connected to Intervals.icu" in w["delivery"]
+    intervals.connect(c, rid, "i5", "a-key-for-tests-123")
+    d = dex.draft(c, rid, today=TODAY)
+    assert d["summary"]["watch"]["level"] == "ok" and "Watch: Garmin: structured workouts" in dex.summary_text("Tom", d)
+    c.execute("UPDATE runners SET watch='apple'")
+    assert "NOT ON THE WATCH: Apple" in dex.summary_text("Tom", dex.draft(c, rid, today=TODAY))
+    c.execute("UPDATE runners SET watch='coros'")
+    assert dex.draft(c, rid, plan="c25k", today=TODAY)["summary"]["watch"]["level"] == "check"
