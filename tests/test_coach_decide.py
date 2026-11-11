@@ -401,8 +401,12 @@ def test_join_alert_from_the_gateway_log(conn, coach_ctx, tmp_path, monkeypatch)
     log_.write_text("INFO start\nWARNING Unauthorized DM from chat_id=555000111 username=@tomrunner declined\n"
                     "WARNING Unauthorized DM from chat_id=555000111 username=@tomrunner declined\n")
     add_runner(conn, "Andy", "12345", 186, None)
+    assert joins.scan(conn, log_) == []                    # first scan starts at the end: no history alerts
+    conn.execute("UPDATE app_state SET value='0'")
     new = joins.scan(conn, log_)
     assert new == [{"chat_id": "555000111", "name": "tomrunner"}] and joins.scan(conn, log_) == []
+    assert joins.find("2026-10-19 15:46:02,858 WARNING gateway.run: Unauthorized user: 8900567635 (Andrew) on telegram\n"
+                      "next line name: zzz") == [("8900567635", "Andrew")]
     with open(log_, "a") as f:
         f.write("WARNING Unauthorized DM from chat_id=12345 declined\nWARNING unauthorised user id: 777888999\n")
     assert [p["chat_id"] for p in joins.scan(conn, log_)] == ["777888999"]      # registered people are skipped

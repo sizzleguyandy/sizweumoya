@@ -13,8 +13,11 @@ import os
 import re
 from pathlib import Path
 
+from .config import settings
+
+# Hermes v0.22 logs: "WARNING gateway.run: Unauthorized user: 8900567635 (Andrew) on telegram"
 DEFAULT_PATTERN = (r"(?i)unauthori[sz]ed.*?(?:chat|user|sender)[ _]?(?:id)?['\"=: ]+(?P<chat_id>\d{5,15})"
-                   r"(?:.*?(?:username|name)['\"=: ]+@?(?P<name>[\w.-]{2,40}))?")
+                   r"(?:\s*\((?P<name>[^)\n]{1,40})\)|[^\n]*?(?:username|name)['\"=: ]+@?(?P<name2>[\w.-]{2,40}))?")
 STATE_KEY = "join_log_offset"
 
 
@@ -34,7 +37,8 @@ def find(text: str) -> list[tuple[str, str | None]]:
         cid = m.group("chat_id")
         if cid not in seen:
             seen.add(cid)
-            out.append((cid, (m.groupdict().get("name") or "").strip() or None))
+            g = m.groupdict()
+            out.append((cid, (g.get("name") or g.get("name2") or "").strip() or None))
     return out
 
 
@@ -45,8 +49,9 @@ def scan(conn, path: Path | None = None) -> list[dict]:
     if path is None or not path.exists():
         return []
     row = conn.execute("SELECT value FROM app_state WHERE key=?", (STATE_KEY,)).fetchone()
-    offset = int(row["value"]) if row else 0
     size = path.stat().st_size
+    # First ever scan: start at the end, so old log lines don't raise alerts about past visitors.
+    offset = int(row["value"]) if row else size
     if offset > size:
         offset = 0
     with open(path, "rb") as f:
@@ -56,7 +61,8 @@ def scan(conn, path: Path | None = None) -> list[dict]:
                  (STATE_KEY, str(size)))
     new = []
     for cid, name in find(text):
-        if conn.execute("SELECT 1 FROM runners WHERE telegram_chat_id=?", (cid,)).fetchone():
+        if cid == str(settings.coach_chat_id).strip() or conn.execute(
+                "SELECT 1 FROM runners WHERE telegram_chat_id=?", (cid,)).fetchone():
             continue
         cur = conn.execute("INSERT OR IGNORE INTO join_requests (chat_id, name) VALUES (?,?)", (cid, name))
         if cur.rowcount:

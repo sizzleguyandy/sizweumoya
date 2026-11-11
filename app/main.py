@@ -23,7 +23,9 @@ log = logging.getLogger("rac")
 async def lifespan(_app):
     conn = connect()
     init_db(conn)
+    n = conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'").fetchone()[0]
     conn.close()
+    log.warning("schema ready: %s tables in %s", n, settings.db_path)
     yield
 
 
