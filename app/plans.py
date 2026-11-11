@@ -114,6 +114,19 @@ def _active(conn, rid: int, type_: str, today: date):
 FOCUSES = ("running", "strength", "hybrid")
 
 
+def mark_missed(conn, rid: int, today: date | None = None) -> int:
+    """Open sessions whose day has passed (with a day's grace, since a run can count a day late)
+    become 'missed'. A late run still matches a missed session and turns it to done."""
+    today = today or date.today()
+    cur = conn.execute(
+        "UPDATE planned_workouts SET status='missed' WHERE runner_id=? AND status='planned' AND date<?"
+        " AND plan_id IN (SELECT id FROM plans WHERE active=1)",
+        (rid, (today - timedelta(days=MATCH_DAYS)).isoformat()))
+    if cur.rowcount:
+        conn.commit()
+    return cur.rowcount
+
+
 def today_info(today: date | None = None) -> dict:
     """Today's date as the server's clock has it, so the model never has to guess the day."""
     today = today or date.today()
@@ -152,6 +165,7 @@ def sessions_around(conn, rid: int, today: date | None = None) -> dict:
     """Programme sessions around today (last, today, next three) for each discipline that
     has a programme on file. Nothing for a discipline the person logs themselves."""
     today = today or date.today()
+    mark_missed(conn, rid, today)
     m = mode(conn, rid, today)
     if m["running"] != "guided" and m["strength"] != "guided":
         return {"today_is": today_info(today), "mode": "monitor", "sessions": []}
@@ -205,6 +219,7 @@ def tomorrow_session(conn, rid: int, today: date | None = None) -> list:
 
 def strength_vs_programme(conn, rid: int, start: date, end: date) -> dict:
     """Strength programme sessions in the period: planned, done, missed, still to come."""
+    mark_missed(conn, rid)
     ws = conn.execute(
         "SELECT w.* FROM planned_workouts w JOIN plans p ON p.id=w.plan_id WHERE w.runner_id=?"
         " AND p.active=1 AND p.type='strength' AND w.date>=? AND w.date<? ORDER BY w.date",
@@ -220,6 +235,7 @@ def week_vs_programme(conn, rid: int, start: date, end: date, actual: dict) -> d
     When Coach Andy loaded a new programme partway through the week, the days before it
     started still count with the sessions of the programme it replaced, so the week is
     compared with everything that was planned for it, not just the second half."""
+    mark_missed(conn, rid)
     ws = conn.execute(
         "SELECT w.* FROM planned_workouts w JOIN plans p ON p.id=w.plan_id WHERE w.runner_id=?"
         " AND p.active=1 AND p.type='run' AND w.date>=? AND w.date<? AND w.status!='cancelled' ORDER BY w.date",

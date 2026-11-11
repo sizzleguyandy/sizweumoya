@@ -277,8 +277,9 @@ def job_nudge(request: Request, tasks: BackgroundTasks):
             (f"-{NUDGE_DAYS} days", f"-{NUDGE_DAYS} days")).fetchall()
     for r in due:
         tasks.add_task(_deliver, r, "The runner hasn't sent a run or workout for a few days. Send one short, "
-                       "friendly check-in: ask how things are going and remind them they can send their "
-                       "latest .fit file or type a gym session. No pressure, no guilt, one or two sentences.",
+                       "friendly check-in: ask how things are going. Only if they send files by hand (not synced "
+                       "through Intervals.icu or Hevy), remind them they can send their latest .fit file or "
+                       "type a gym session. No pressure, no guilt, one or two sentences.",
                        kind="nudge")
     return {"queued": len(due)}
 
@@ -290,6 +291,7 @@ def job_records(request: Request):
     with session() as conn:
         ids = [r[0] for r in conn.execute("SELECT runner_id FROM runners")]
         for rid in ids:
+            plans.mark_missed(conn, rid)
             record.export_runner(conn, rid)
     return {"records": len(ids)}
 

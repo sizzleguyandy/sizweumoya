@@ -8,7 +8,6 @@
 - strength_records: best weights and estimated 1RM per lift.
 All numbers come from the database; Sarah words them.
 """
-import json
 from datetime import date, timedelta
 from statistics import mean
 

@@ -1,5 +1,13 @@
 # Onboarding, the personal record, and focus
 
+## How a new person gets in
+1. They open the bot in Telegram and tap Start. Hermes declines them (they aren't registered).
+2. `/jobs/join-requests` reads the gateway log (`JOIN_LOG_FILE`, `JOIN_LOG_PATTERN`) and Coach Andy
+   gets "New person ... (Telegram ID ...)". He replies `add <name> <id>` or `ignore <id>` in the
+   coach chat.
+3. He tells the PC agent "add the approved runners": `python -m app.admin join-requests` prints the
+   `onboard` command for each; then the Hermes steps and `welcome` as below.
+
 ## Adding a person (Coach Andy / the Hermes agent)
 
 ```
@@ -84,3 +92,5 @@ python -m app.admin offboard --runner <id> [--keep-copy final.db]  # delete ever
 | `/jobs/nudge` | daily 17:00 (after 5 quiet days, at most every 5 days) |
 | `/jobs/quiet-runners` | daily 08:00 (Coach Andy, 7+ days) |
 | `/jobs/records` | daily 02:30 (before the 03:00 backup) |
+| `/jobs/intervals-sync` | hourly at :17 (runs, wellness, calendar) |
+| `/jobs/join-requests` | every 5 minutes (new people who messaged the bot) |

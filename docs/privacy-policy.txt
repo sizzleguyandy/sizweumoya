@@ -1,10 +1,10 @@
 Privacy Policy
 ==============
 
-TR3D Core · Sizwe Umoya running coaching
-Last updated: 21 October 2026
+TR3D Core · Sizwe Umoya running and strength coaching
+Last updated: 11 November 2026
 
-This policy explains what personal information TR3D Core ("we", "us") collects when you use our running coaching service, including our Telegram assistant "Sarah", how we use it, who we share it with, and the choices you have. We are based in South Africa and process personal information in line with the Protection of Personal Information Act, 2013 (POPIA). Where the EU or UK GDPR applies to you, we also follow it.
+This policy explains what personal information TR3D Core ("we", "us") collects when you use our running and strength coaching service, including our Telegram assistant "Sarah", how we use it, who we share it with, and the choices you have. We are based in South Africa and process personal information in line with the Protection of Personal Information Act, 2013 (POPIA). Where the EU or UK GDPR applies to you, we also follow it.
 
 1. WHO IS RESPONSIBLE
 
@@ -14,9 +14,13 @@ The responsible party is Andrew Hammond trading as TR3D Core, 39 Hely Hutchinson
 
 - Account details: Name, Telegram user ID and chat ID (Source: You, when you join)
 
-- Training data: Runs and workouts: date, distance, time, pace, heart rate, heart rate zones, elevation, temperature, GPS-derived statistics, strength sets, reps and weights (Source: Files you send us (.fit / .zip), workouts you type, and, if you connect your Garmin account, Garmin Connect)
+- Training data: Runs and workouts: date, distance, time, pace, heart rate, heart rate zones, elevation, temperature, GPS-derived statistics, strength sets, reps and weights (Source: Files you send us (.fit / .zip), workouts you type, and, if you connect them, your Intervals.icu account (which receives your watch's data, for example from Garmin Connect or Zepp) and your Hevy account)
 
-- Health information: Heart rate data; injuries, niggles, illness or wellbeing you tell us about; body weight if you share it (Source: You and your training data)
+- Health information: Heart rate data; resting heart rate, heart rate variability, sleep and body weight if your watch shares them through Intervals.icu; injuries, niggles, illness or wellbeing you tell us about (Source: You, your training data and Intervals.icu)
+
+- Location: The town or city where you usually run, which you tell us, used to look up the weather forecast for pace advice (Source: You)
+
+- Programme form: If you ask for a training programme, your answers to our Google Form (race, training days, recent race time, injuries) (Source: You)
 
 - Goals and plans: Races, target times, training plans written by your coach (Source: You and your coach)
 
@@ -24,19 +28,24 @@ The responsible party is Andrew Hammond trading as TR3D Core, 39 Hely Hutchinson
 
 We do not collect payment card details through this service. The original files you send (which can contain GPS location) are kept on our server so we can re-check your data, and are deleted with the rest of your data. Our reports use summary statistics, not your location.
 
-3. GARMIN DATA
+3. CONNECTED ACCOUNTS
 
-If you choose to connect your Garmin account, Garmin shares the activity and health data you authorise with us through the Garmin Connect Developer Program. We use it only to provide the coaching service to you, as described in this policy. We do not sell Garmin data, use it for advertising, or share it with anyone except the service providers listed in section 6 who help us deliver the service. You can disconnect at any time in Garmin Connect or by asking us; we then stop receiving new data and delete your Garmin data on request.
+Intervals.icu. If you connect your Intervals.icu account, you add Coach Andy as your coach there. We then read your activities and daily wellness data from Intervals.icu, write your training programme to your Intervals.icu calendar (from where it can go to your watch), and keep your heart rate zones there in step with ours. We never ask for your Intervals.icu password or API key. Data from Strava is not used: activities that reached Intervals.icu from Strava are skipped.
+
+Hevy. If you connect your Hevy account, Hevy tells us when you save a workout and we read that workout (exercises, sets, reps, weights).
+
+You can disconnect either at any time, in that app or by asking us; we then stop receiving new data and delete what came from it on request.
 
 4. HOW WE USE YOUR INFORMATION
 
 - To give feedback on each run and workout, weekly and monthly reports, fitness trends, training paces and heart rate zones.
 - To flag training load and injury risk, and to alert your coach when something needs a human look.
-- To suggest a taper before a race and, if you have a coaching plan, to compare your training with it.
+- To suggest a taper before a race and, if you have a coaching programme, to write it, put it on your calendar and watch, and compare your training with it.
+- To adjust pace advice for the forecast heat, humidity and altitude where you run.
 - To answer your running questions in chat.
 - To run, secure and improve the service, and to keep backups.
 
-Automated assistant. Sarah is an AI assistant. Your training data and messages are processed by an AI language model to write feedback and replies. Your coach reviews anything health-related and makes all training plan decisions. We do not use your data to train AI models, and we use provider settings that do not allow your data to be used for training.
+Automated assistant. Sarah is an AI assistant: her messages are written by an AI language model from your training data and your messages. Running programmes are drafted by software from your data and approved by your coach before you receive them; strength programmes are written by your coach. Your coach reviews anything health-related and makes all training plan decisions. No decision with legal or similarly significant effect is made about you by automated means alone. We do not use your data to train AI models, and we use provider settings that do not allow your data to be used for training.
 
 Not medical advice. The service gives general training feedback, not medical advice. For chest pain, fainting, dizziness or injury, see a doctor or physiotherapist.
 
@@ -52,13 +61,16 @@ We never sell your personal information. We share it only with service providers
 - OpenRouter, to generate the assistant's feedback and replies.
 - Cloudflare, for secure network access to our server.
 - Microsoft OneDrive, for backups of our database in a private, access-controlled account.
-- Garmin, only if you connect your Garmin account (data flows from Garmin to us).
+- Intervals.icu, only if you connect it: we read your activities and wellness data and write your programme and heart rate zones to your account.
+- Hevy, only if you connect it (workouts flow from Hevy to us).
+- Google (Google Forms and Sheets), for the programme form, if you fill it in.
+- Open-Meteo, for weather forecasts: we send only the coordinates of the town you gave us, never your name or training data.
 
 Your coach (Coach Andy) can see your training data and messages. Other runners never see your information. We may disclose information if the law requires it.
 
 7. INTERNATIONAL TRANSFERS
 
-Our database is stored in South Africa. Some providers above (Telegram, OpenRouter, Cloudflare, Microsoft) may process data outside South Africa. Where this happens we rely on providers that offer adequate protection as required by section 72 of POPIA (and, where relevant, GDPR safeguards such as standard contractual clauses).
+Our database is stored in South Africa. Some providers above (Telegram, OpenRouter, Cloudflare, Microsoft, Google, Intervals.icu, Hevy, Open-Meteo) may process data outside South Africa. Where this happens we rely on providers that offer adequate protection as required by section 72 of POPIA (and, where relevant, GDPR safeguards such as standard contractual clauses).
 
 8. HOW LONG WE KEEP IT
 

@@ -415,3 +415,20 @@ def test_join_alert_from_the_gateway_log(conn, coach_ctx, tmp_path, monkeypatch)
     assert conn.execute("SELECT status FROM join_requests WHERE chat_id='555000111'").fetchone()[0] == "added"
     log_.write_text("")                                                           # rotated log: start again
     assert joins.scan(conn, log_) == []
+
+
+def test_past_sessions_become_missed_and_a_late_run_still_counts(conn):
+    import json as _j
+    from datetime import date as _d, timedelta as _td
+    from app import plans
+    rid, _, _ = add_runner(conn, "Andy", "12345", 186, None)
+    today = _d.today()
+    pid = conn.execute("INSERT INTO plans (runner_id, type, start_date, end_date) VALUES (?,?,?,?)",
+                       (rid, "run", (today - _td(days=5)).isoformat(), (today + _td(days=5)).isoformat())).lastrowid
+    for off in (-3, -1, 0, 2):
+        conn.execute("INSERT INTO planned_workouts (plan_id, runner_id, date, description, target) VALUES (?,?,?,?,?)",
+                     (pid, rid, (today + _td(days=off)).isoformat(), "Easy", _j.dumps({"kind": "easy", "km": 5})))
+    assert plans.mark_missed(conn, rid) == 1                       # only the one from 3 days ago
+    st = [r[0] for r in conn.execute("SELECT status FROM planned_workouts ORDER BY date")]
+    assert st == ["missed", "planned", "planned", "planned"]
+    assert plans.sessions_around(conn, rid)["last"][1]["status"] == "missed"
