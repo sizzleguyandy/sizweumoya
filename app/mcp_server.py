@@ -20,7 +20,7 @@ from datetime import date as _date
 from datetime import datetime as _dt
 from datetime import timedelta
 
-from . import (dex, hermes, ingest, intake, intervals, keyboard, onboarding, paces, plans, queries, racelib,
+from . import (dex, hermes, ingest, intake, intervals, joins, keyboard, onboarding, paces, plans, queries, racelib,
                raceplan, record, stats, strength, tiers, trends, truepace, upload, workouts)
 from .config import settings
 from .db import session
@@ -998,6 +998,35 @@ def coach_delete_run(ctx: Context, runner: str, run_id: int) -> str:
     reopened = "; ".join(f"{w['date']} {w['description']}" for w in res["sessions_reopened"])
     return (f"Deleted {r['name']}'s run of {d['distance_km']} km on {d['date']}."
             + (f" Reopened: {reopened}." if reopened else "") + " It won't be imported again.")
+
+
+@mcp.tool()
+def coach_join_requests(ctx: Context) -> list[dict]:
+    """Coach only: people who messaged the bot before being registered and are waiting for a decision."""
+    _require_coach(ctx)
+    with session() as conn:
+        return joins.pending(conn)
+
+
+@mcp.tool()
+def coach_join_decide(ctx: Context, chat_id: str, decision: str, name: str = "") -> str:
+    """Coach only: decide on someone who asked to join. decision: add (with their name) or ignore.
+    "add" approves them; the Hermes side needs the PC, so pass on the sentence this returns."""
+    _require_coach(ctx)
+    chat_id, decision = str(chat_id).strip(), (decision or "").strip().lower()
+    with session() as conn:
+        row = conn.execute("SELECT status FROM join_requests WHERE chat_id=?", (chat_id,)).fetchone()
+        if row is None:
+            return "Nobody with that Telegram ID has asked to join (coach_join_requests lists who has)."
+        if decision == "ignore":
+            joins.close(conn, chat_id, "ignored")
+            return "Ignored. They won't be mentioned again."
+        if decision != "add" or not name.strip():
+            return "Say: add <their name> <id>, or ignore <id>."
+        conn.execute("UPDATE join_requests SET status='approved', name=? WHERE chat_id=?", (name.strip()[:60], chat_id))
+        conn.commit()
+    return (f"Approved {name.strip()}. Setting up their chat needs the PC: tell the Hermes agent "
+            f"\"add the approved runners\" (python -m app.admin join-requests). They start on the free plan.")
 
 
 @mcp.tool()

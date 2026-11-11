@@ -50,6 +50,7 @@ def add_runner(conn, name: str, chat_id: str, max_hr: int | None, goal: str | No
         (name, chat_id, "pending", hash_token(token), max_hr,
          json.dumps(stats.default_zones(max_hr)) if max_hr else None, goal),
     )
+    conn.execute("UPDATE join_requests SET status='added' WHERE chat_id=?", (str(chat_id),))
     rid = cur.lastrowid
     profile = f"runner-{rid}"
     conn.execute("UPDATE runners SET hermes_profile=? WHERE runner_id=?", (profile, rid))
@@ -124,6 +125,7 @@ def main() -> None:
     ic2 = sub.add_parser("intake-code", help="a runner's TR3D code for the programme form")
     ic2.add_argument("--runner", type=int, required=True)
     sub.add_parser("dex-form", help="print the programme form's questions, to build it in Google Forms")
+    sub.add_parser("join-requests", help="people waiting to join, with the command to add each approved one")
     dd = sub.add_parser("dedupe-runs", help="find runs stored twice from different files (--apply removes them)")
     dd.add_argument("--runner", type=int, required=True)
     dd.add_argument("--apply", action="store_true")
@@ -312,6 +314,15 @@ def main() -> None:
     elif args.cmd == "dex-form":
         from . import intake
         print(intake.form_markdown())
+    elif args.cmd == "join-requests":
+        rows_ = conn.execute("SELECT chat_id, name, status, first_seen FROM join_requests"
+                             " WHERE status IN ('new','approved') ORDER BY first_seen").fetchall()
+        for r in rows_:
+            if r["status"] == "approved":
+                print(f"APPROVED  {r['name']}  ->  python -m app.admin onboard --name \"{r['name']}\" --chat-id {r['chat_id']}")
+            else:
+                print(f"waiting for Coach Andy  {r['name'] or '(no name)'}  id {r['chat_id']}  since {r['first_seen']}")
+        print(f"{len(rows_)} open. After onboard + welcome, an approved person is closed automatically.")
     elif args.cmd == "dedupe-runs":
         from . import ingest
         pairs = ingest.duplicate_runs(conn, args.runner)

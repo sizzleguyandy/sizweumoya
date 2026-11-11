@@ -12,7 +12,7 @@ from datetime import date
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
-from . import garmin, hermes, hevy, intervals, onboarding, plans, queries, record, trends
+from . import garmin, hermes, hevy, intervals, joins, onboarding, plans, queries, record, trends
 from .config import settings
 from .db import connect, init_db, session
 
@@ -330,6 +330,19 @@ def _intervals_sync(links: list[dict]) -> None:
                                            "strength debrief as usual.", kind="strength_debrief")
         except Exception:
             log.exception("Intervals.icu sync failed for runner %s", rid)
+
+
+@app.post("/jobs/join-requests")
+def job_join_requests(request: Request):
+    """Every few minutes: tell Coach Andy about anyone new who messaged the bot and was turned away."""
+    _check_jobs_token(request)
+    with session() as conn:
+        new = joins.scan(conn)
+    for p in new:
+        who = f"{p['name']} " if p["name"] else ""
+        hermes.notify_coach(f"New person {who}(Telegram ID {p['chat_id']}) messaged the bot and was turned away. "
+                            f"To let them in, reply: add <their name> {p['chat_id']}. To ignore: ignore {p['chat_id']}.")
+    return {"new": len(new)}
 
 
 @app.post("/jobs/quiet-runners")

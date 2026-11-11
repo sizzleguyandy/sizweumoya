@@ -197,6 +197,19 @@ CREATE TABLE IF NOT EXISTS deleted_activities (
     deleted_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- People who messaged the bot before being registered (found in the Hermes gateway log).
+CREATE TABLE IF NOT EXISTS join_requests (
+    chat_id    TEXT PRIMARY KEY,
+    name       TEXT,
+    first_seen TEXT NOT NULL DEFAULT (datetime('now')),
+    status     TEXT NOT NULL DEFAULT 'new'      -- new / added / ignored
+);
+
+CREATE TABLE IF NOT EXISTS app_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+
 -- Answers from the Dex programme form (Google Form), one row per submission.
 CREATE TABLE IF NOT EXISTS dex_intake (
     id           INTEGER PRIMARY KEY,

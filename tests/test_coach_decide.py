@@ -393,3 +393,25 @@ def test_pull_skips_a_deleted_run_even_if_the_file_differs(conn):
     assert intervals.deleted_before(conn, rid, {"id": "i555"})            # then by its id
     assert not intervals.deleted_before(conn, rid, {"id": "i9", "start_date_local": "2026-10-28T06:00:00",
                                                      "distance": 12200.0, "moving_time": 5962})   # the joined run
+
+
+def test_join_alert_from_the_gateway_log(conn, coach_ctx, tmp_path, monkeypatch):
+    from app import joins
+    log_ = tmp_path / "gateway.log"
+    log_.write_text("INFO start\nWARNING Unauthorized DM from chat_id=555000111 username=@tomrunner declined\n"
+                    "WARNING Unauthorized DM from chat_id=555000111 username=@tomrunner declined\n")
+    add_runner(conn, "Andy", "12345", 186, None)
+    new = joins.scan(conn, log_)
+    assert new == [{"chat_id": "555000111", "name": "tomrunner"}] and joins.scan(conn, log_) == []
+    with open(log_, "a") as f:
+        f.write("WARNING Unauthorized DM from chat_id=12345 declined\nWARNING unauthorised user id: 777888999\n")
+    assert [p["chat_id"] for p in joins.scan(conn, log_)] == ["777888999"]      # registered people are skipped
+    assert len(mcp_server.coach_join_requests(coach_ctx)) == 2
+    assert mcp_server.coach_join_decide(coach_ctx, "777888999", "ignore").startswith("Ignored")
+    assert mcp_server.coach_join_decide(coach_ctx, "555000111", "add").startswith("Say: add")
+    assert "add the approved runners" in mcp_server.coach_join_decide(coach_ctx, "555000111", "add", "Tom")
+    assert mcp_server.coach_join_decide(coach_ctx, "1", "add", "X").startswith("Nobody")
+    add_runner(conn, "Tom", "555000111", None, None)
+    assert conn.execute("SELECT status FROM join_requests WHERE chat_id='555000111'").fetchone()[0] == "added"
+    log_.write_text("")                                                           # rotated log: start again
+    assert joins.scan(conn, log_) == []
