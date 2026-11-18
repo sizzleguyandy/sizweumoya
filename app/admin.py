@@ -69,6 +69,9 @@ def main() -> None:
         a.add_argument("--max-hr", type=int)
         a.add_argument("--goal")
         a.add_argument("--focus", choices=["running", "strength", "hybrid"])
+    sg = sub.add_parser("set-goal", help="the runner's current goal, in a few words")
+    sg.add_argument("--runner", type=int, required=True)
+    sg.add_argument("--goal", required=True)
     fo = sub.add_parser("set-focus")
     fo.add_argument("--runner", type=int, required=True)
     fo.add_argument("--focus", required=True, choices=["running", "strength", "hybrid"])
@@ -494,6 +497,11 @@ def main() -> None:
         print(json.dumps(tracker_import.import_workbook(conn, runner, args.file), indent=2))
         _calendar(conn, args.runner)
 
+    elif args.cmd == "set-goal":
+        conn.execute("UPDATE runners SET goal=? WHERE runner_id=?", (args.goal.strip()[:200], args.runner))
+        conn.commit()
+        record.export_runner(conn, args.runner)
+        print(f"Runner {args.runner} goal: {args.goal.strip()[:200]}")
     elif args.cmd == "set-focus":
         onboarding.set_focus(conn, args.runner, args.focus)
         record.export_runner(conn, args.runner)

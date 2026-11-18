@@ -226,3 +226,22 @@ def test_link_goes_live_once_coach_request_is_accepted(db, monkeypatch):
     assert c.execute("SELECT status FROM intervals_links WHERE runner_id=?", (tom,)).fetchone()[0] == "active"
     z = c.execute("SELECT kind, status, payload FROM approvals WHERE runner_id=?", (tom,)).fetchone()
     assert z["kind"] == "zones" and z["status"] == "pending" and json.loads(z["payload"])["max_hr"] == 190
+
+
+def test_reconcile_covers_the_whole_programme(db, monkeypatch):
+    c, rid = db
+    far = (TODAY + timedelta(days=40)).isoformat()
+    pid = c.execute("SELECT plan_id FROM planned_workouts LIMIT 1").fetchone()[0]
+    c.execute("INSERT INTO planned_workouts (plan_id, runner_id, date, description, target) VALUES (?,?,?,?,?)",
+              (pid, rid, far, "Race", json.dumps({"kind": "race", "km": 14})))
+    c.commit()
+    sent = []
+
+    def handler(req):
+        if req.method == "POST":
+            sent.extend(json.loads(req.content))
+            return httpx.Response(200, json=[])
+        return httpx.Response(200, json=[])
+    mock(monkeypatch, handler)
+    intervals.reconcile(c, rid)
+    assert any(e["start_date_local"].startswith(far) for e in sent)       # day 40 goes out too

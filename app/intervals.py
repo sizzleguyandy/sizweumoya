@@ -225,11 +225,16 @@ def push(conn, rid: int, start: date | None = None, days: int = 28, dry_run: boo
 EXT_PREFIX = "sizwe-"
 
 
-def reconcile(conn, rid: int, days: int = 28) -> dict:
-    """Make the Intervals.icu calendar match the programme for the next `days` days: send every
-    open session (new, moved or edited ones are updated in place), and remove calendar entries we
-    created whose session no longer exists or whose programme was replaced. Completed sessions and
-    anything the person added themselves are never touched."""
+def reconcile(conn, rid: int, days: int | None = None) -> dict:
+    """Make the Intervals.icu calendar match the programme from today to the end of the active
+    programme (at least 28 days, at most 120): send every open session (new, moved or edited ones
+    are updated in place), and remove calendar entries we created whose session no longer exists
+    or whose programme was replaced. Completed sessions and anything the person added themselves
+    are never touched."""
+    if days is None:
+        last = conn.execute("SELECT MAX(w.date) FROM planned_workouts w JOIN plans p ON p.id=w.plan_id"
+                            " WHERE w.runner_id=? AND p.active=1", (rid,)).fetchone()[0]
+        days = max(28, min(120, (date.fromisoformat(last) - date.today()).days + 1)) if last else 28
     start, end = date.today(), date.today() + timedelta(days=days)
     sent = push(conn, rid, start=start, days=days)
     link = link_for(conn, rid)
